@@ -10,7 +10,7 @@ from src.services import get_info_for_service, get_service_status, get_services,
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
+logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates")
 static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
