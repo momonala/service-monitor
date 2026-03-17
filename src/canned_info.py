@@ -3,6 +3,12 @@ from src.services import ServiceStatus
 # Website links with icons (icon mapping centralized here, not in template)
 websites = [
     {
+        "name": "cycle-tracker",
+        "url": "https://cycle-tracker.mnalavadi.org",
+        "description": "Cycle Tracker",
+        "icon": "🥚",
+    },
+    {
         "name": "task-manager",
         "url": "https://task-manager.mnalavadi.org",
         "description": "Task Manager",
