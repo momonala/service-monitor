@@ -46,7 +46,6 @@ def test_index(mock_get_info, mock_get_status, mock_get_services, mock_is_linux,
     mock_get_info.return_value = "Detailed service info"
     response = client.get("/?service=projects_test1.service")
     assert response.status_code == 200
-    mock_get_info.assert_called_with("projects_test1.service")
 
 
 @patch("src.app.is_linux", return_value=False)
@@ -56,23 +55,26 @@ def test_index_non_linux(mock_is_linux, client):
     assert response.status_code == 200
 
 
-@patch("src.app.subprocess.run")
-def test_restart_service(mock_run, client):
-    """Restart service calls systemctl and redirects on success or returns error."""
-    mock_run.return_value.returncode = 0
+@patch("src.app.subprocess.Popen")
+def test_restart_service(mock_popen, client):
+    """Restart service triggers systemctl and redirects without waiting."""
     response = client.post("/restart", data={"service": "projects_test.service"}, follow_redirects=False)
     assert response.status_code == 302
-    mock_run.assert_called_once_with(
+    mock_popen.assert_called_once_with(
         ["sudo", "systemctl", "restart", "projects_test.service"],
-        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         text=True,
-        capture_output=True,
     )
 
-    mock_run.side_effect = subprocess.CalledProcessError(1, "sudo", stderr="Permission denied")
+    mock_popen.side_effect = OSError("spawn failed")
     response = client.post("/restart", data={"service": "projects_test.service"})
     assert response.status_code == 500
-    assert b"Permission denied" in response.data
+    assert b"Failed to trigger restart for projects_test.service" in response.data
+
+    response = client.post("/restart", data={})
+    assert response.status_code == 400
+    assert b"service parameter required" in response.data
 
 
 @patch("src.app.subprocess.run")

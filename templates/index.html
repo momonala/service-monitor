@@ -142,7 +142,45 @@
                 {% if selected_service_info %}
                 <!-- Service Detail View -->
                 <div class="service-info-panel">
-                    <pre class="service-info">{{ selected_service_info }}</pre>
+                    <pre class="service-info service-info--status">{{ selected_service_info }}</pre>
+                </div>
+                <div class="log-stream-panel">
+                    <div class="log-stream-header">
+                        <span class="log-stream-title">Live Logs</span>
+                        <span id="logLineCounter" class="log-stream-counter" aria-live="polite">0 lines</span>
+                        <span id="logStreamStatus" class="log-stream-badge log-stream-badge--connecting" aria-live="polite">connecting…</span>
+                    </div>
+                    <div class="log-filters" aria-label="Log filters">
+                        <label class="log-filter-field">
+                            <span>Time</span>
+                            <select id="logTimeFilterMode">
+                                <option value="all" selected>All</option>
+                                <option value="after">After</option>
+                                <option value="before">Before</option>
+                                <option value="between">Between</option>
+                            </select>
+                        </label>
+                        <label class="log-filter-field">
+                            <span>Start</span>
+                            <input id="logTimeStart" type="datetime-local">
+                        </label>
+                        <label class="log-filter-field">
+                            <span>End</span>
+                            <input id="logTimeEnd" type="datetime-local">
+                        </label>
+                        <label class="log-filter-field log-filter-field--wide">
+                            <span>Text contains</span>
+                            <input id="logTextFilter" type="text" placeholder="e.g. werkzeug">
+                        </label>
+                        <label class="log-filter-checkbox">
+                            <input id="logCaseSensitive" type="checkbox">
+                            <span>Aa</span>
+                        </label>
+                    </div>
+                    <div class="log-chart-panel">
+                        <canvas id="logSpikeChart" class="log-spike-chart" height="42" aria-label="Log spike timeline"></canvas>
+                    </div>
+                    <pre id="logStream" class="service-info log-stream-body" data-service="{{ current }}" aria-label="Live log output for {{ current }}"></pre>
                 </div>
                 {% else %}
                 <!-- Dashboard Home View -->
@@ -173,5 +211,7 @@
     <div aria-live="polite" aria-atomic="true" class="sr-only" id="statusAnnouncer"></div>
 
     <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='log-stream.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='main.js') }}" defer></script>
 </body>
 </html>

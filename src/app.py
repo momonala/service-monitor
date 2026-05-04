@@ -1,8 +1,9 @@
+import json
 import logging
 import os
 import subprocess
 
-from flask import Flask, redirect, render_template, request, url_for
+from flask import Flask, Response, redirect, render_template, request, stream_with_context, url_for
 
 from src.canned_info import canned_service_statuses, websites
 from src.scheduler import start_threads
@@ -19,15 +20,23 @@ app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
 
 @app.route("/restart", methods=["POST"])
 def restart_service():
-    """Restart a given service and redirect back to the index view."""
+    """Trigger a service restart and immediately redirect back to the index view."""
     service = request.form.get("service", "")
+    if not service:
+        return "service parameter required", 400
+
     try:
         # Requires appropriate sudoers configuration for the running user
-        subprocess.run(["sudo", "systemctl", "restart", service], check=True, text=True, capture_output=True)
-        logger.info("Successfully restarted service %s", service)
-    except subprocess.CalledProcessError as exc:
-        logger.error("Failed to restart %s: %s", service, exc.stderr)
-        return (exc.stderr or f"Failed to restart {service}"), 500
+        subprocess.Popen(
+            ["sudo", "systemctl", "restart", service],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        logger.info("Triggered restart for service %s", service)
+    except OSError as exc:
+        logger.error("Failed to trigger restart for %s: %s", service, exc)
+        return f"Failed to trigger restart for {service}", 500
 
     return redirect(url_for("index", service=service))
 
@@ -57,6 +66,41 @@ def inspector_detector_check():
     return redirect(url_for("index", service=service))
 
 
+@app.route("/logs/stream")
+def stream_logs():
+    """SSE endpoint that tails journalctl for a given service."""
+    service = request.args.get("service", "")
+    if not service:
+        return "service parameter required", 400
+
+    def generate():
+        if not is_linux():
+            yield "data: [Log streaming is only available on Linux]\n\n"
+            return
+
+        proc = subprocess.Popen(
+            ["journalctl", "-u", service, "-f", "-n", "500", "--no-pager", "--output=short-iso"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            for line in proc.stdout:
+                yield f"data: {json.dumps(line.rstrip())}\n\n"
+        finally:
+            proc.terminate()
+            proc.wait()
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @app.route("/")
 def index():
     service = request.args.get("service")
@@ -66,8 +110,9 @@ def index():
     else:
         service_statuses = canned_service_statuses
 
-    # Get detailed info for selected service if one is selected
-    selected_service_info = get_info_for_service(service) if service else ""
+    # lines=0: show only the systemctl status header (Active, Memory, CPU).
+    # Log lines are streamed live via the /logs/stream SSE endpoint.
+    selected_service_info = get_info_for_service(service, lines=0) if service else ""
 
     return render_template(
         "index.html",
