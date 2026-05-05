@@ -139,7 +139,7 @@
                 </div>
             </header>
 
-            <div class="content-body">
+            <div class="content-body {% if selected_service_info %}content-body--service-view{% endif %}">
                 {% if selected_service_info %}
                 <!-- Service Detail View -->
                 <div class="service-info-panel">
@@ -176,6 +176,10 @@
                         <label class="log-filter-checkbox">
                             <input id="logCaseSensitive" type="checkbox">
                             <span>Aa</span>
+                        </label>
+                        <label class="log-filter-checkbox">
+                            <input id="logReverseDirection" type="checkbox">
+                            <span>Newest first</span>
                         </label>
                     </div>
                     <div class="log-chart-panel">

@@ -4,6 +4,7 @@
     const LOG_SPIKE_BUCKETS = 48;
     let activeLogSource = null;
     const logEntries = [];
+    let reverseDirection = false;
 
     /**
      * Classify a log line and return a CSS class for coloring.
@@ -69,6 +70,7 @@
     function applyLogFilters() {
         const modeEl = document.getElementById('logTimeFilterMode');
         if (!modeEl) return;
+        syncLogDirection();
 
         const mode = modeEl.value;
         const startTs = parseFilterDateValue(document.getElementById('logTimeStart')?.value || '');
@@ -131,19 +133,23 @@
      * Setup event listeners for log filtering controls.
      */
     function setupLogFilters() {
-        const ids = ['logTimeFilterMode', 'logTimeStart', 'logTimeEnd', 'logTextFilter', 'logCaseSensitive'];
+        const ids = ['logTimeFilterMode', 'logTimeStart', 'logTimeEnd', 'logTextFilter', 'logCaseSensitive', 'logReverseDirection'];
 
         for (const id of ids) {
             const control = document.getElementById(id);
             if (!control) continue;
             control.addEventListener('input', applyLogFilters);
             control.addEventListener('change', () => {
+                if (id === 'logReverseDirection') {
+                    syncLogDirection();
+                }
                 syncLogFilterFieldVisibility();
                 applyLogFilters();
             });
         }
 
         syncLogFilterFieldVisibility();
+        syncLogDirection();
         setDefaultTimeFilterValues();
         applyLogFilters();
     }
@@ -358,13 +364,17 @@
      * @param {string} line
      */
     function appendLogLine(el, line) {
-        const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+        const pinnedToEdge = isPinnedToActiveEdge(el);
 
         const span = document.createElement('span');
         const cls = logLineClass(line);
         if (cls) span.className = cls;
         span.textContent = line + '\n';
-        el.appendChild(span);
+        if (reverseDirection) {
+            el.prepend(span);
+        } else {
+            el.appendChild(span);
+        }
 
         logEntries.push({
             line,
@@ -374,7 +384,68 @@
 
         applyLogFilters();
 
-        if (atBottom) el.scrollTop = el.scrollHeight;
+        if (pinnedToEdge) {
+            scrollToActiveEdge(el);
+        }
+    }
+
+    /**
+     * Whether log list is pinned to the active insertion edge.
+     * @param {HTMLElement} el
+     * @param {boolean} reverse
+     * @returns {boolean}
+     */
+    function isPinnedToActiveEdge(el, reverse = reverseDirection) {
+        if (reverse) {
+            return el.scrollTop < 40;
+        }
+        return el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    }
+
+    /**
+     * Scroll log list to insertion edge.
+     * @param {HTMLElement} el
+     * @param {boolean} reverse
+     */
+    function scrollToActiveEdge(el, reverse = reverseDirection) {
+        if (reverse) {
+            el.scrollTop = 0;
+            return;
+        }
+        el.scrollTop = el.scrollHeight;
+    }
+
+    /**
+     * Re-render current log DOM order for the selected direction.
+     * @param {HTMLElement} logEl
+     */
+    function reorderLogEntries(logEl) {
+        const fragment = document.createDocumentFragment();
+        const entriesInDisplayOrder = reverseDirection ? [...logEntries].reverse() : logEntries;
+        for (const entry of entriesInDisplayOrder) {
+            fragment.appendChild(entry.element);
+        }
+        logEl.appendChild(fragment);
+    }
+
+    /**
+     * Sync reverse-direction toggle state with stream rendering behavior.
+     */
+    function syncLogDirection() {
+        const reverseToggle = document.getElementById('logReverseDirection');
+        const logEl = document.getElementById('logStream');
+        if (!(reverseToggle instanceof HTMLInputElement) || !logEl) return;
+
+        const shouldReverse = reverseToggle.checked;
+        if (shouldReverse === reverseDirection) return;
+
+        const wasPinnedToEdge = isPinnedToActiveEdge(logEl, reverseDirection);
+        reverseDirection = shouldReverse;
+        reorderLogEntries(logEl);
+
+        if (wasPinnedToEdge) {
+            scrollToActiveEdge(logEl, reverseDirection);
+        }
     }
 
     /**
