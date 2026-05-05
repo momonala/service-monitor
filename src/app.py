@@ -2,12 +2,13 @@ import json
 import logging
 import os
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 
-from flask import Flask, Response, redirect, render_template, request, stream_with_context, url_for
+from flask import Flask, Response, jsonify, redirect, render_template, request, stream_with_context, url_for
 
 from src.canned_info import canned_service_statuses, websites
 from src.scheduler import start_threads
-from src.services import get_info_for_service, get_service_status, get_services, is_linux
+from src.services import get_info_for_service, get_service_health, get_service_status, get_services, is_linux
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -16,6 +17,19 @@ logging.getLogger("werkzeug").setLevel(logging.WARNING)
 template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates")
 static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
 app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
+MAX_STATUS_WORKERS = 8
+
+
+def _collect_statuses(services: list[str], detailed: bool) -> list:
+    """Fetch service statuses in parallel while preserving service order."""
+    if not services:
+        return []
+    with ThreadPoolExecutor(max_workers=min(MAX_STATUS_WORKERS, len(services))) as pool:
+        if detailed:
+            return list(
+                pool.map(lambda svc: get_service_status(svc, include_ci=True, status_lines=0), services)
+            )
+        return list(pool.map(get_service_health, services))
 
 
 @app.route("/restart", methods=["POST"])
@@ -101,12 +115,36 @@ def stream_logs():
     )
 
 
+@app.route("/api/services/sidebar-details")
+def sidebar_details():
+    """Return enriched service details for sidebar rendering after first paint."""
+    if not is_linux():
+        return jsonify({"services": []})
+
+    services = get_services()
+    detailed_statuses = _collect_statuses(services, detailed=True)
+    payload = [
+        {
+            "name": status.name,
+            "is_active": status.is_active,
+            "is_failed": status.is_failed,
+            "uptime": status.uptime,
+            "memory": status.memory,
+            "cpu": status.cpu,
+            "last_error": status.last_error,
+            "ci_status": status.ci_status,
+        }
+        for status in detailed_statuses
+    ]
+    return jsonify({"services": payload})
+
+
 @app.route("/")
 def index():
     service = request.args.get("service")
     if is_linux():
         services = get_services()
-        service_statuses = [get_service_status(svc) for svc in services]
+        service_statuses = _collect_statuses(services, detailed=False)
     else:
         service_statuses = canned_service_statuses
 

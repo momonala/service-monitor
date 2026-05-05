@@ -19,12 +19,12 @@ def client():
 
 @patch("src.app.is_linux", return_value=True)
 @patch("src.app.get_services")
-@patch("src.app.get_service_status")
+@patch("src.app.get_service_health")
 @patch("src.app.get_info_for_service")
-def test_index(mock_get_info, mock_get_status, mock_get_services, mock_is_linux, client):
+def test_index(mock_get_info, mock_get_health, mock_get_services, mock_is_linux, client):
     """Index route renders with services and selected service info."""
     mock_get_services.return_value = ["projects_test1.service", "projects_test2.service"]
-    mock_get_status.return_value = ServiceStatus(
+    mock_get_health.return_value = ServiceStatus(
         name="projects_test1.service",
         is_active=True,
         is_failed=False,
@@ -41,7 +41,7 @@ def test_index(mock_get_info, mock_get_status, mock_get_services, mock_is_linux,
 
     response = client.get("/")
     assert response.status_code == 200
-    assert mock_get_status.call_count == 2
+    assert mock_get_health.call_count == 2
 
     mock_get_info.return_value = "Detailed service info"
     response = client.get("/?service=projects_test1.service")
@@ -100,3 +100,29 @@ def test_inspector_detector_check(mock_run, client):
     response = client.post("/inspector-detector/check", data={"service": "projects_train.service"})
     assert response.status_code == 500
     assert b"Script failed" in response.data
+
+
+@patch("src.app.is_linux", return_value=True)
+@patch("src.app.get_services", return_value=["projects_test1.service"])
+@patch("src.app.get_service_status")
+def test_sidebar_details(mock_get_status, mock_get_services, mock_is_linux, client):
+    """Sidebar details endpoint returns enriched service status JSON."""
+    mock_get_status.return_value = ServiceStatus(
+        name="projects_test1.service",
+        is_active=True,
+        is_failed=False,
+        uptime="1 day",
+        memory="100M",
+        cpu="10s",
+        last_error=None,
+        full_status="",
+        project_group="test1",
+        suffix=None,
+        ci_status="success",
+    )
+
+    response = client.get("/api/services/sidebar-details")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["services"][0]["name"] == "projects_test1.service"
+    assert payload["services"][0]["ci_status"] == "success"

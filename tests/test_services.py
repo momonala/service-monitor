@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
+import src.services as services_module
 from src.canned_info import canned_service_statuses
 from src.services import (
     get_ci_status,
@@ -17,6 +18,13 @@ from src.services import (
     parse_service_name,
     parse_uptime,
 )
+
+
+@pytest.fixture(autouse=True)
+def reset_service_caches():
+    services_module._services_cache = None
+    services_module._ci_status_cache.clear()
+    yield
 
 
 @pytest.mark.parametrize(
@@ -89,10 +97,10 @@ def test_get_services(mock_check_output):
         "projects_test1.service       loaded active running   Test Service 1\n"
         "projects_test2.service       loaded active running   Test Service 2\n"
     )
-    assert get_services() == ["projects_test1.service", "projects_test2.service"]
+    assert get_services(use_cache=False) == ["projects_test1.service", "projects_test2.service"]
 
     mock_check_output.return_value = ""
-    assert get_services() == []
+    assert get_services(use_cache=False) == []
 
 
 @patch("src.services.subprocess.run")
@@ -233,3 +241,18 @@ def test_get_service_status_includes_ci(mock_get_ci, mock_get_info):
     status = get_service_status("projects_test.service")
     assert status.ci_status == "success"
     mock_get_ci.assert_called_once_with("test")
+
+
+@patch("src.services.requests.get")
+def test_get_ci_status_uses_cache(mock_get):
+    """CI status calls GitHub once within cache TTL."""
+    mock_response = mock_get.return_value
+    mock_response.raise_for_status.return_value = None
+    mock_response.json.return_value = {"workflow_runs": [{"conclusion": "success"}]}
+
+    first = get_ci_status("test-repo")
+    second = get_ci_status("test-repo")
+
+    assert first == "success"
+    assert second == "success"
+    mock_get.assert_called_once()

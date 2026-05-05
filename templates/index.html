@@ -83,7 +83,8 @@
             <nav class="sidebar__nav">
                 {% for svc in services %}
                 <div class="service-item {% if svc.name == current %}service-item--active{% endif %}" 
-                     data-project-group="{{ svc.project_group }}">
+                     data-project-group="{{ svc.project_group }}"
+                     data-service-name="{{ svc.name }}">
                     <a href="?service={{ svc.name }}" class="service-link">
                         <span class="status-indicator {% if svc.is_active %}status-indicator--active{% elif svc.is_failed %}status-indicator--failed{% else %}status-indicator--inactive{% endif %}" 
                               aria-label="{% if svc.is_active %}Active{% elif svc.is_failed %}Failed{% else %}Inactive{% endif %}"></span>
@@ -212,6 +213,7 @@
 
     <script src="{{ url_for('static', filename='app.js') }}" defer></script>
     <script src="{{ url_for('static', filename='log-stream.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='sidebar-details.js') }}" defer></script>
     <script src="{{ url_for('static', filename='main.js') }}" defer></script>
 </body>
 </html>

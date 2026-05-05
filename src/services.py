@@ -2,6 +2,7 @@ import logging
 import platform
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 
 import requests
@@ -13,6 +14,11 @@ except ImportError:
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+SERVICES_CACHE_TTL_SECONDS = 5.0
+CI_STATUS_CACHE_TTL_SECONDS = 60.0
+_services_cache: tuple[float, list[str]] | None = None
+_ci_status_cache: dict[str, tuple[float, str]] = {}
 
 
 @dataclass
@@ -53,8 +59,16 @@ def get_github_repo_name(project_group: str) -> str:
     return project_group
 
 
-def get_ci_status(repo_name: str) -> str:
-    """Get CI status from GitHub Actions API."""
+def get_ci_status(repo_name: str, use_cache: bool = True) -> str:
+    """Get CI status from GitHub Actions API with a short TTL cache."""
+    now = time.monotonic()
+    if use_cache:
+        cached = _ci_status_cache.get(repo_name)
+        if cached is not None:
+            cached_at, cached_value = cached
+            if now - cached_at < CI_STATUS_CACHE_TTL_SECONDS:
+                return cached_value
+
     url = f"https://api.github.com/repos/momonala/{repo_name}/actions/workflows/ci.yml/runs?per_page=1"
     headers = {}
     if GITHUB_TOKEN:
@@ -69,11 +83,13 @@ def get_ci_status(repo_name: str) -> str:
         latest_run = data["workflow_runs"][0]
         conclusion = latest_run.get("conclusion")
         if conclusion == "success":
-            return "success"
+            status = "success"
         elif conclusion == "failure":
-            return "failure"
+            status = "failure"
         else:
-            return "error"
+            status = "error"
+        _ci_status_cache[repo_name] = (now, status)
+        return status
     except requests.RequestException as exc:
         logger.error("Failed to fetch CI status for %s: %s", repo_name, exc)
         return "error"
@@ -86,12 +102,21 @@ def is_linux():
     return platform.system() == "Linux"
 
 
-def get_services():
+def get_services(use_cache: bool = True) -> list[str]:
+    global _services_cache
+    now = time.monotonic()
+    if use_cache and _services_cache is not None:
+        cached_at, cached_services = _services_cache
+        if now - cached_at < SERVICES_CACHE_TTL_SECONDS:
+            return cached_services
+
     out = subprocess.check_output(
         ["systemctl", "list-units", "--type=service", "--no-legend", "--plain", "projects_*"],
         text=True,
     )
-    return [line.strip().split()[0] for line in out.strip().splitlines()]
+    services = [line.strip().split()[0] for line in out.strip().splitlines()]
+    _services_cache = (now, services)
+    return services
 
 
 def parse_uptime(status_text):
@@ -126,14 +151,36 @@ def get_info_for_service(service: str, lines: int = 1000) -> str:
     return result.stdout
 
 
-def get_service_status(service):
-    status_text = get_info_for_service(service)
+def get_service_health(service: str) -> ServiceStatus:
+    """Get minimal service status for first paint."""
+    project_group, suffix = parse_service_name(service)
+    result = subprocess.run(["systemctl", "is-active", service], text=True, capture_output=True)
+    state = (result.stdout or "").strip().lower()
+    is_active = state == "active"
+    is_failed = state == "failed"
+    return ServiceStatus(
+        name=service,
+        is_active=is_active,
+        is_failed=is_failed,
+        uptime=None,
+        memory=None,
+        cpu=None,
+        last_error=None,
+        full_status="",
+        project_group=project_group,
+        suffix=suffix,
+        ci_status=None,
+    )
+
+
+def get_service_status(service: str, include_ci: bool = True, status_lines: int = 0) -> ServiceStatus:
+    status_text = get_info_for_service(service, lines=status_lines)
     project_group, suffix = parse_service_name(service)
     is_active = "active (running)" in status_text.lower()
 
     # Only fetch CI status for services without suffixes
     ci_status = None
-    if suffix is None:
+    if include_ci and suffix is None:
         repo_name = get_github_repo_name(project_group)
         ci_status = get_ci_status(repo_name)
 

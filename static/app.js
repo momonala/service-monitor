@@ -331,6 +331,8 @@
             if (newSummary && currentSummary) {
                 currentSummary.innerHTML = newSummary.innerHTML;
             }
+
+            window.ServiceMonitorSidebarDetails?.load();
             
             // Reapply search filter if active
             const searchValue = elements.serviceSearch?.value;
