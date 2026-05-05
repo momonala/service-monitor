@@ -283,17 +283,60 @@
         const maxBucket = Math.max(...buckets, 1);
         const gap = 1;
         const barWidth = (cssWidth - (LOG_SPIKE_BUCKETS - 1) * gap) / LOG_SPIKE_BUCKETS;
+        const chartTop = 2;
+        const axisY = cssHeight - 16;
+        const chartHeight = Math.max(axisY - chartTop, 1);
 
         ctx.fillStyle = 'rgba(10, 132, 255, 0.16)';
-        ctx.fillRect(0, cssHeight - 1, cssWidth, 1);
+        ctx.fillRect(0, axisY, cssWidth, 1);
 
         ctx.fillStyle = 'rgba(10, 132, 255, 0.75)';
         for (let i = 0; i < LOG_SPIKE_BUCKETS; i++) {
-            const height = Math.max(1, (buckets[i] / maxBucket) * (cssHeight - 3));
+            const height = Math.max(1, (buckets[i] / maxBucket) * chartHeight);
             const x = i * (barWidth + gap);
-            const y = cssHeight - height;
+            const y = axisY - height;
             ctx.fillRect(x, y, barWidth, height);
         }
+
+        drawXAxisLabels(ctx, cssWidth, axisY, windowStart, windowEnd);
+    }
+
+    /**
+     * Draw readable start/mid/end labels for the chart time window.
+     * @param {CanvasRenderingContext2D} ctx
+     * @param {number} width
+     * @param {number} axisY
+     * @param {number} windowStart
+     * @param {number} windowEnd
+     */
+    function drawXAxisLabels(ctx, width, axisY, windowStart, windowEnd) {
+        const mid = windowStart + ((windowEnd - windowStart) / 2);
+        const labels = [
+            { x: 0, align: 'left', ts: windowStart },
+            { x: width / 2, align: 'center', ts: mid },
+            { x: width, align: 'right', ts: windowEnd },
+        ];
+
+        ctx.fillStyle = 'rgba(161, 161, 166, 0.92)';
+        ctx.font = '10px -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif';
+        ctx.textBaseline = 'top';
+
+        for (const label of labels) {
+            ctx.textAlign = label.align;
+            ctx.fillText(formatAxisLabel(label.ts), label.x, axisY + 3);
+        }
+    }
+
+    /**
+     * Format a timestamp for compact, readable x-axis labels.
+     * @param {number} timestamp
+     * @returns {string}
+     */
+    function formatAxisLabel(timestamp) {
+        const date = new Date(timestamp);
+        const timeText = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const dayText = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        return `${dayText} ${timeText}`;
     }
 
     /**
