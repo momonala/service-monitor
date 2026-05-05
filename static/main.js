@@ -2,7 +2,8 @@
     'use strict';
 
     function initAll() {
-        window.ServiceMonitorApp?.init();
+        window.ServiceMonitorUiShell?.init();
+        window.ServiceMonitorServicesList?.init();
         window.ServiceMonitorLogStream?.init();
         window.ServiceMonitorSidebarDetails?.load().catch((error) => {
             console.error('⚠️ Sidebar details load failed:', error);

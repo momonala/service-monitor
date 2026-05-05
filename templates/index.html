@@ -211,7 +211,9 @@
     <!-- Accessibility Live Region -->
     <div aria-live="polite" aria-atomic="true" class="sr-only" id="statusAnnouncer"></div>
 
-    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='notifications.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='ui-shell.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='services-list.js') }}" defer></script>
     <script src="{{ url_for('static', filename='log-stream.js') }}" defer></script>
     <script src="{{ url_for('static', filename='sidebar-details.js') }}" defer></script>
     <script src="{{ url_for('static', filename='main.js') }}" defer></script>
