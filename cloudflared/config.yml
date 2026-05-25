@@ -1,6 +1,5 @@
 tunnel: raspberrypi-tunnel
 credentials-file: /home/mnalavadi/.cloudflared/raspberrypi-tunnel.json
-
 ingress:
   - hostname: servicemonitor.mnalavadi.org
     service: http://localhost:5001
@@ -20,4 +19,12 @@ ingress:
     service: http://localhost:5008
   - hostname: ios-health.mnalavadi.org
     service: http://localhost:5009
+  - hostname: task-manager.mnalavadi.org
+    service: http://localhost:5010
+  - hostname: whats-on-the-menu.mnalavadi.org
+    service: http://localhost:5011
+  - hostname: cycle-tracker.mnalavadi.org
+    service: http://localhost:5012
+  - hostname: spyglass.mnalavadi.org
+    service: http://localhost:5013
   - service: http_status:404
