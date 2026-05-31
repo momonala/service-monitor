@@ -38,7 +38,7 @@
     }
 
     function applyProjectColors() {
-        document.querySelectorAll('.service-item').forEach((item) => {
+        document.querySelectorAll('.project-group, .website-pill').forEach((item) => {
             const projectGroup = item.dataset.projectGroup;
             if (!projectGroup) return;
             item.style.setProperty('--project-color', getProjectColor(projectGroup));
@@ -74,12 +74,25 @@
                 const parser = new DOMParser();
                 const doc = parser.parseFromString(html, 'text/html');
 
-                const newNav = doc.querySelector('.sidebar__nav');
-                const currentNav = document.querySelector('.sidebar__nav');
-                if (newNav && currentNav) {
-                    currentNav.innerHTML = newNav.innerHTML;
-                    applyProjectColors();
-                }
+                // Update status icons in-place to avoid DOM teardown flicker
+                doc.querySelectorAll('.service-item[data-service-name]').forEach((newItem) => {
+                    const name = newItem.getAttribute('data-service-name');
+                    const currentItem = document.querySelector(`.service-item[data-service-name="${CSS.escape(name)}"]`);
+                    if (!currentItem) return;
+
+                    const newIcon = newItem.querySelector('.status-icon');
+                    const currentIcon = currentItem.querySelector('.status-icon');
+                    if (newIcon && currentIcon) {
+                        currentIcon.className = newIcon.className;
+                        const ariaLabel = newIcon.getAttribute('aria-label');
+                        if (ariaLabel) currentIcon.setAttribute('aria-label', ariaLabel);
+                        const newUse = newIcon.querySelector('use');
+                        const currentUse = currentIcon.querySelector('use');
+                        if (newUse && currentUse) {
+                            currentUse.setAttribute('href', newUse.getAttribute('href'));
+                        }
+                    }
+                });
 
                 const newSummary = doc.querySelector('.status-summary');
                 const currentSummary = document.querySelector('.status-summary');

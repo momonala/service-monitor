@@ -11,16 +11,20 @@
     
     <!-- Performance optimizations -->
     <link rel="preconnect" href="{{ url_for('static', filename='') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     
     <!-- Critical CSS for instant first paint -->
     <style>
         :root{--color-bg-primary:#000;--color-bg-secondary:#1c1c1e;--color-text-primary:#fff}
-        body{background:var(--color-bg-primary);color:var(--color-text-primary);margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+        body{background:var(--color-bg-primary);color:var(--color-text-primary);margin:0;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
         .app-container{display:flex;min-height:100vh}
-        .sidebar{background:var(--color-bg-secondary)}
+        .sidebar{background:#000}
         .hidden{display:none!important}
     </style>
     
+
     <!-- Load full CSS async -->
     <link rel="preload" href="{{ url_for('static', filename='app.css') }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
     <noscript><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></noscript>
@@ -40,6 +44,24 @@
         <symbol id="icon-external" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" />
         </symbol>
+        <symbol id="icon-check-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+        </symbol>
+        <symbol id="icon-x-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+        </symbol>
+        <symbol id="icon-alert-triangle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+        </symbol>
+        <symbol id="icon-activity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </symbol>
+        <symbol id="icon-alert-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+        </symbol>
+        <symbol id="icon-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+        </symbol>
     </svg>
 
     <!-- Mobile Overlay (backdrop when sidebar is open) -->
@@ -52,7 +74,7 @@
 
     <div class="app-container">
         <!-- Sidebar -->
-        <aside id="sidebar" class="sidebar sidebar--closed" role="navigation" aria-label="Service navigation">
+        <aside id="sidebar" class="sidebar" role="navigation" aria-label="Service navigation">
             <header class="sidebar__header">
                 <button id="sidebarToggle" class="icon-button sidebar__toggle" aria-label="Toggle sidebar" title="Collapse sidebar">
                     <svg aria-hidden="true"><use href="#icon-chevron-left"></use></svg>
@@ -66,11 +88,11 @@
             <!-- Status Summary -->
             <div class="status-summary">
                 <div class="status-summary__item">
-                    <span class="status-indicator status-indicator--active"></span>
+                    <svg class="status-icon status-icon--active" aria-hidden="true"><use href="#icon-activity"></use></svg>
                     <span>{{ services|selectattr('is_active')|list|length }} Active</span>
                 </div>
                 <div class="status-summary__item">
-                    <span class="status-indicator status-indicator--failed"></span>
+                    <svg class="status-icon status-icon--failed" aria-hidden="true"><use href="#icon-alert-circle"></use></svg>
                     <span>{{ services|selectattr('is_failed')|list|length }} Failed</span>
                 </div>
             </div>
@@ -81,41 +103,52 @@
             </div>
             
             <nav class="sidebar__nav">
+                {% set ns = namespace(prev_group=None) %}
                 {% for svc in services %}
-                <div class="service-item {% if svc.name == current %}service-item--active{% endif %}" 
-                     data-project-group="{{ svc.project_group }}"
+                {% if svc.project_group != ns.prev_group %}
+                {% if ns.prev_group is not none %}</div>{% endif %}
+                <div class="project-group" data-project-group="{{ svc.project_group }}">
+                {% set ns.prev_group = svc.project_group %}
+                {% endif %}
+                <div class="service-item {% if svc.name == current %}service-item--active{% endif %}"
                      data-service-name="{{ svc.name }}">
-                    <a href="?service={{ svc.name }}" class="service-link">
-                        <span class="status-indicator {% if svc.is_active %}status-indicator--active{% elif svc.is_failed %}status-indicator--failed{% else %}status-indicator--inactive{% endif %}" 
-                              aria-label="{% if svc.is_active %}Active{% elif svc.is_failed %}Failed{% else %}Inactive{% endif %}"></span>
-                        <span class="service-name">{{ svc.name }}</span>
-                        <span class="service-tooltip" aria-hidden="true">{{ svc.name }}</span>
-                    </a>
-                    {% if svc.uptime or svc.memory or svc.cpu or svc.last_error or svc.ci_status %}
-                    <div class="service-details">
-                        {% if svc.uptime %}
-                        <span class="service-details__item service-details__item--uptime">⏱️ {{ svc.uptime }}</span>
-                        {% endif %}
-                        {% if svc.memory %}
-                        <span class="service-details__item service-details__item--memory">💾 {{ svc.memory }}</span>
-                        {% endif %}
-                        {% if svc.cpu %}
-                        <span class="service-details__item service-details__item--cpu">⚡ {{ svc.cpu }}</span>
-                        {% endif %}
+                    <div class="service-item-grid">
+                        <a href="?service={{ svc.name }}" class="service-link">
+                            <svg class="status-icon {% if svc.is_active %}status-icon--active{% elif svc.is_failed %}status-icon--failed{% else %}status-icon--inactive{% endif %}"
+                                 aria-label="{% if svc.is_active %}Active{% elif svc.is_failed %}Failed{% else %}Inactive{% endif %}">
+                                <use href="#icon-{% if svc.is_active %}activity{% elif svc.is_failed %}alert-circle{% else %}circle{% endif %}"></use>
+                            </svg>
+                            <span class="service-name">
+                                {%- set _parts = svc.name.split('_', 1) -%}
+                                {%- if _parts|length == 2 -%}
+                                    {%- set _prefix = _parts[0] + '_' -%}
+                                    {%- set _rest = _parts[1] -%}
+                                    {%- if _rest.endswith('.service') -%}
+                                        <span class="sn-dim">{{ _prefix }}</span><span class="sn-core">{{ _rest[:-8] }}</span><span class="sn-dim">.service</span>
+                                    {%- else -%}
+                                        <span class="sn-dim">{{ _prefix }}</span><span class="sn-core">{{ _rest }}</span>
+                                    {%- endif -%}
+                                {%- else -%}
+                                    {{ svc.name }}
+                                {%- endif -%}
+                            </span>
+                            <span class="service-tooltip" aria-hidden="true">{{ svc.name }}</span>
+                        </a>
                         {% if svc.ci_status %}
-                        <span class="service-details__item service-details__item--ci">
-                            CI: {% if svc.ci_status == 'success' %}✅{% elif svc.ci_status == 'failure' %}❌{% else %}⚠️{% endif %}
+                        <span class="service-details__item service-details__item--ci service-details__item--ci-{{ svc.ci_status }}">
+                            <svg class="service-details__icon" aria-label="CI {{ svc.ci_status }}"><use href="#icon-{% if svc.ci_status == 'success' %}check-circle{% elif svc.ci_status == 'failure' %}x-circle{% else %}alert-triangle{% endif %}"></use></svg>
                         </span>
                         {% endif %}
-                        {% if svc.last_error %}
-                        <span class="service-details__item service-details__item--error" title="{{ svc.last_error }}">❌ {{ svc.last_error }}</span>
+                        {% if svc.uptime %}
+                        <span class="service-uptime">{{ svc.uptime }}</span>
                         {% endif %}
                     </div>
-                    {% endif %}
                 </div>
                 {% endfor %}
+                {% if services %}</div>{% endif %}
             </nav>
         </aside>
+        <script>try{var _s=document.getElementById('sidebar');if(_s){var _w=window.innerWidth;if(_w<640){_s.className='sidebar sidebar--closed';}else if(localStorage.getItem('servicemonitor:sidebar-collapsed')==='true'&&_w>=1024){_s.classList.add('sidebar--collapsed');}}}catch(e){}</script>
 
         <!-- Main Content -->
         <main class="main-content">
@@ -153,21 +186,15 @@
                     </div>
                     <div class="log-filters" aria-label="Log filters">
                         <label class="log-filter-field">
-                            <span>Time</span>
+                            <span>Window</span>
                             <select id="logTimeFilterMode">
-                                <option value="all" selected>All</option>
-                                <option value="after">After</option>
-                                <option value="before">Before</option>
-                                <option value="between">Between</option>
+                                <option value="last5m">Last 5 min</option>
+                                <option value="last15m">Last 15 min</option>
+                                <option value="last30m" selected>Last 30 min</option>
+                                <option value="last60m">Last 60 min</option>
+                                <option value="last1d">Last day</option>
+                                <option value="all">All</option>
                             </select>
-                        </label>
-                        <label class="log-filter-field">
-                            <span>Start</span>
-                            <input id="logTimeStart" type="datetime-local">
-                        </label>
-                        <label class="log-filter-field">
-                            <span>End</span>
-                            <input id="logTimeEnd" type="datetime-local">
                         </label>
                         <label class="log-filter-field log-filter-field--wide">
                             <span>Text contains</span>
@@ -189,18 +216,15 @@
                 </div>
                 {% else %}
                 <!-- Dashboard Home View -->
-                <div class="website-grid">
+                <div class="website-pills">
                     {% for website in websites %}
-                    <a href="{{ website.url }}" 
-                       target="_blank" 
-                       rel="noopener noreferrer" 
-                       class="website-card">
-                        <h2 class="website-card__title">
-                            <span class="website-card__icon" aria-hidden="true">{{ website.icon | default('🔗') }}</span>
-                            <span>{{ website.name }}</span>
-                            <svg class="website-card__external" aria-hidden="true"><use href="#icon-external"></use></svg>
-                        </h2>
-                        <p class="website-card__description">{{ website.description }}</p>
+                    <a href="{{ website.url }}"
+                       target="_blank"
+                       rel="noopener noreferrer"
+                       class="website-pill"
+                       data-project-group="{{ website.name }}">
+                        <span>{{ website.name }}</span>
+                        <svg class="website-pill__external" aria-hidden="true"><use href="#icon-external"></use></svg>
                     </a>
                     {% endfor %}
                 </div>
@@ -209,9 +233,6 @@
         </main>
     </div>
 
-    <!-- Toast Notification Container -->
-    <div id="toastContainer" style="position:fixed;top:1rem;right:1rem;z-index:9999;pointer-events:none;"></div>
-    
     <!-- Accessibility Live Region -->
     <div aria-live="polite" aria-atomic="true" class="sr-only" id="statusAnnouncer"></div>
 

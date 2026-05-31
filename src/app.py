@@ -150,7 +150,7 @@ def index():
 
     # lines=0: show only the systemctl status header (Active, Memory, CPU).
     # Log lines are streamed live via the /logs/stream SSE endpoint.
-    selected_service_info = get_info_for_service(service, lines=0) if service else ""
+    selected_service_info = get_info_for_service(service, lines=0) if (service and is_linux()) else ""
 
     return render_template(
         "index.html",

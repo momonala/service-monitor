@@ -1,20 +1,22 @@
 (function() {
     'use strict';
 
-    /**
-     * Build a detail badge item.
-     * @param {string} className
-     * @param {string} text
-     * @param {string} [title]
-     * @returns {HTMLSpanElement}
-     */
-    function buildDetailItem(className, text, title) {
+    function buildIcon(name) {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('aria-hidden', 'true');
+        svg.setAttribute('class', 'service-details__icon');
+        const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+        use.setAttribute('href', `#icon-${name}`);
+        svg.appendChild(use);
+        return svg;
+    }
+
+    function buildDetailItem(className, iconName, text, title) {
         const item = document.createElement('span');
         item.className = `service-details__item ${className}`;
-        item.textContent = text;
-        if (title) {
-            item.title = title;
-        }
+        item.appendChild(buildIcon(iconName));
+        item.appendChild(document.createTextNode(text));
+        if (title) item.title = title;
         return item;
     }
 
@@ -24,54 +26,48 @@
      * @param {object} status
      */
     function updateServiceItem(serviceItem, status) {
-        const indicator = serviceItem.querySelector('.status-indicator');
-        if (indicator) {
-            indicator.classList.remove('status-indicator--active', 'status-indicator--failed', 'status-indicator--inactive');
+        const icon = serviceItem.querySelector('.status-icon');
+        if (icon) {
+            icon.classList.remove('status-icon--active', 'status-icon--failed', 'status-icon--inactive');
+            const use = icon.querySelector('use');
             if (status.is_active) {
-                indicator.classList.add('status-indicator--active');
-                indicator.setAttribute('aria-label', 'Active');
+                icon.classList.add('status-icon--active');
+                icon.setAttribute('aria-label', 'Active');
+                if (use) use.setAttribute('href', '#icon-activity');
             } else if (status.is_failed) {
-                indicator.classList.add('status-indicator--failed');
-                indicator.setAttribute('aria-label', 'Failed');
+                icon.classList.add('status-icon--failed');
+                icon.setAttribute('aria-label', 'Failed');
+                if (use) use.setAttribute('href', '#icon-alert-circle');
             } else {
-                indicator.classList.add('status-indicator--inactive');
-                indicator.setAttribute('aria-label', 'Inactive');
+                icon.classList.add('status-icon--inactive');
+                icon.setAttribute('aria-label', 'Inactive');
+                if (use) use.setAttribute('href', '#icon-circle');
             }
         }
 
-        let details = serviceItem.querySelector('.service-details');
-        const hasDetails = Boolean(
-            status.uptime || status.memory || status.cpu || status.last_error || status.ci_status,
-        );
-        if (!hasDetails) {
-            details?.remove();
-            return;
-        }
+        const grid = serviceItem.querySelector('.service-item-grid');
+        if (!grid) return;
 
-        if (!details) {
-            details = document.createElement('div');
-            details.className = 'service-details';
-            serviceItem.appendChild(details);
-        }
-        details.innerHTML = '';
+        // Remove previous dynamic bottom-row cells
+        grid.querySelector('.service-details__item--ci')?.remove();
+        grid.querySelector('.service-uptime')?.remove();
 
-        if (status.uptime) {
-            details.appendChild(buildDetailItem('service-details__item--uptime', `⏱️ ${status.uptime}`));
-        }
-        if (status.memory) {
-            details.appendChild(buildDetailItem('service-details__item--memory', `💾 ${status.memory}`));
-        }
-        if (status.cpu) {
-            details.appendChild(buildDetailItem('service-details__item--cpu', `⚡ ${status.cpu}`));
-        }
         if (status.ci_status) {
-            const ciEmoji = status.ci_status === 'success' ? '✅' : status.ci_status === 'failure' ? '❌' : '⚠️';
-            details.appendChild(buildDetailItem('service-details__item--ci', `CI: ${ciEmoji}`));
+            const ciIcon = status.ci_status === 'success' ? 'check-circle' : status.ci_status === 'failure' ? 'x-circle' : 'alert-triangle';
+            const ciClass = `service-details__item service-details__item--ci service-details__item--ci-${status.ci_status}`;
+            const ciSpan = document.createElement('span');
+            ciSpan.className = ciClass;
+            const ciSvg = buildIcon(ciIcon);
+            ciSvg.setAttribute('aria-label', `CI ${status.ci_status}`);
+            ciSvg.removeAttribute('aria-hidden');
+            ciSpan.appendChild(ciSvg);
+            grid.appendChild(ciSpan);
         }
-        if (status.last_error) {
-            details.appendChild(
-                buildDetailItem('service-details__item--error', `❌ ${status.last_error}`, status.last_error),
-            );
+        if (status.uptime) {
+            const item = document.createElement('span');
+            item.className = 'service-uptime';
+            item.textContent = status.uptime;
+            grid.appendChild(item);
         }
     }
 

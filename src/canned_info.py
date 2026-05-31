@@ -2,56 +2,17 @@ from src.services import ServiceStatus
 
 # Website links with icons (icon mapping centralized here, not in template)
 websites = [
-    {
-        "name": "cycle-tracker",
-        "url": "https://cycle-tracker.mnalavadi.org",
-        "description": "Cycle Tracker",
-        "icon": "🥚",
-    },
-    {
-        "name": "task-manager",
-        "url": "https://task-manager.mnalavadi.org",
-        "description": "Task Manager",
-        "icon": "📝",
-    },
-    {
-        "name": "energyMonitor",
-        "url": "https://energy-monitor.mnalavadi.org",
-        "description": "Energy Monitor",
-        "icon": "⚡️",
-    },
-    {
-        "name": "USC-vis",
-        "url": "https://usc-vis.mnalavadi.org",
-        "description": "USC checkin visualizer",
-        "icon": "💪🏾",
-    },
-    {
-        "name": "trainspotter",
-        "url": "https://trainspotter.mnalavadi.org",
-        "description": "Spot when the next train comes!",
-        "icon": "🚃",
-    },
-    {
-        "name": "inspectordetector",
-        "url": "https://inspectordetector.mnalavadi.org",
-        "description": "Gute Schwarzfahrt!",
-        "icon": "🚨",
-    },
-    {
-        "name": "pingpong",
-        "url": "https://pingpong.mnalavadi.org",
-        "description": "Shared Expense Tracker",
-        "icon": "🏓",
-    },
-    {"name": "Trace", "url": "https://trace.mnalavadi.org", "description": "GPS Tracker", "icon": "📍"},
-    {"name": "Spyglass", "url": "https://spyglass.mnalavadi.org", "description": "GPS Tracker", "icon": "🔍"},
-    {
-        "name": "What's On the Menu?",
-        "url": "https://whats-on-the-menu.mnalavadi.org",
-        "description": "AI Menu Translation",
-        "icon": "🍲",
-    },
+    {"name": "cycle-tracker", "url": "https://cycle-tracker.mnalavadi.org"},
+    {"name": "task-manager", "url": "https://task-manager.mnalavadi.org"},
+    {"name": "energy-monitor", "url": "https://energy-monitor.mnalavadi.org"},
+    {"name": "usc-vis", "url": "https://usc-vis.mnalavadi.org"},
+    {"name": "incognita", "url": "https://incognita.mnalavadi.org"},
+    {"name": "trainspotter", "url": "https://trainspotter.mnalavadi.org"},
+    {"name": "inspector-detector", "url": "https://inspectordetector.mnalavadi.org"},
+    {"name": "pingpong", "url": "https://pingpong.mnalavadi.org"},
+    {"name": "Trace", "url": "https://trace.mnalavadi.org"},
+    {"name": "spyglass", "url": "https://spyglass.mnalavadi.org"},
+    {"name": "What's On the Menu?", "url": "https://whats-on-the-menu.mnalavadi.org"},
 ]
 websites.sort(key=lambda x: x["name"].lower())
 

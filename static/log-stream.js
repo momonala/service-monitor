@@ -33,34 +33,27 @@
         return Number.isNaN(parsed) ? null : parsed;
     }
 
-    /**
-     * Parse datetime-local input value to a timestamp.
-     * @param {string} value
-     * @returns {number|null}
-     */
-    function parseFilterDateValue(value) {
-        if (!value) return null;
-        const parsed = Date.parse(value);
-        return Number.isNaN(parsed) ? null : parsed;
-    }
+    const RELATIVE_WINDOW_MS = {
+        last5m:  5 * 60 * 1000,
+        last15m: 15 * 60 * 1000,
+        last30m: 30 * 60 * 1000,
+        last60m: 60 * 60 * 1000,
+        last1d:  24 * 60 * 60 * 1000,
+    };
 
     /**
-     * Check whether the given log entry passes the active timestamp filter.
+     * Check whether the given log entry falls within [startTs, endTs].
+     * Passing null for both means "all time".
      * @param {{timestamp:number|null}} entry
-     * @param {'all'|'after'|'before'|'between'} mode
      * @param {number|null} startTs
      * @param {number|null} endTs
      * @returns {boolean}
      */
-    function passesTimestampFilter(entry, mode, startTs, endTs) {
-        if (mode === 'all') return true;
+    function passesTimestampFilter(entry, startTs, endTs) {
+        if (startTs === null && endTs === null) return true;
         if (entry.timestamp === null) return false;
-
-        if (mode === 'after') return startTs === null ? true : entry.timestamp >= startTs;
-        if (mode === 'before') return endTs === null ? true : entry.timestamp <= endTs;
-
-        const afterStart = startTs === null ? true : entry.timestamp >= startTs;
-        const beforeEnd = endTs === null ? true : entry.timestamp <= endTs;
+        const afterStart = startTs === null || entry.timestamp >= startTs;
+        const beforeEnd  = endTs   === null || entry.timestamp <= endTs;
         return afterStart && beforeEnd;
     }
 
@@ -73,18 +66,19 @@
         syncLogDirection();
 
         const mode = modeEl.value;
-        const startTs = parseFilterDateValue(document.getElementById('logTimeStart')?.value || '');
-        const endTs = parseFilterDateValue(document.getElementById('logTimeEnd')?.value || '');
+        const nowTs = Date.now();
+        const offsetMs = RELATIVE_WINDOW_MS[mode] ?? null;
+        const startTs = offsetMs !== null ? nowTs - offsetMs : null;
+        const endTs   = offsetMs !== null ? nowTs : null;
+
         const textFilter = document.getElementById('logTextFilter')?.value || '';
         const caseSensitive = document.getElementById('logCaseSensitive')?.checked || false;
-
         const normalizedNeedle = caseSensitive ? textFilter : textFilter.toLowerCase();
 
         let visibleCount = 0;
         const visibleEntries = [];
         for (const entry of logEntries) {
-            const visibleByTime = passesTimestampFilter(entry, mode, startTs, endTs);
-
+            const visibleByTime = passesTimestampFilter(entry, startTs, endTs);
             const haystack = caseSensitive ? entry.line : entry.line.toLowerCase();
             const visibleByText = normalizedNeedle === '' || haystack.includes(normalizedNeedle);
 
@@ -97,60 +91,26 @@
         }
 
         updateLogCounter(visibleCount, logEntries.length);
-        renderLogSpikeChart(visibleEntries, mode, startTs, endTs);
-    }
-
-    /**
-     * Toggle filter date input visibility based on selected mode.
-     */
-    function syncLogFilterFieldVisibility() {
-        const mode = document.getElementById('logTimeFilterMode')?.value;
-        const startField = document.getElementById('logTimeStart')?.closest('.log-filter-field');
-        const endField = document.getElementById('logTimeEnd')?.closest('.log-filter-field');
-        if (!mode || !startField || !endField) return;
-
-        if (mode === 'all') {
-            startField.classList.add('hidden');
-            endField.classList.add('hidden');
-            return;
-        }
-        if (mode === 'after') {
-            startField.classList.remove('hidden');
-            endField.classList.add('hidden');
-            return;
-        }
-        if (mode === 'before') {
-            startField.classList.add('hidden');
-            endField.classList.remove('hidden');
-            return;
-        }
-
-        startField.classList.remove('hidden');
-        endField.classList.remove('hidden');
+        renderLogSpikeChart(visibleEntries, startTs, endTs);
     }
 
     /**
      * Setup event listeners for log filtering controls.
      */
     function setupLogFilters() {
-        const ids = ['logTimeFilterMode', 'logTimeStart', 'logTimeEnd', 'logTextFilter', 'logCaseSensitive', 'logReverseDirection'];
+        const ids = ['logTimeFilterMode', 'logTextFilter', 'logCaseSensitive', 'logReverseDirection'];
 
         for (const id of ids) {
             const control = document.getElementById(id);
             if (!control) continue;
             control.addEventListener('input', applyLogFilters);
             control.addEventListener('change', () => {
-                if (id === 'logReverseDirection') {
-                    syncLogDirection();
-                }
-                syncLogFilterFieldVisibility();
+                if (id === 'logReverseDirection') syncLogDirection();
                 applyLogFilters();
             });
         }
 
-        syncLogFilterFieldVisibility();
         syncLogDirection();
-        setDefaultTimeFilterValues();
         applyLogFilters();
     }
 
@@ -166,62 +126,12 @@
     }
 
     /**
-     * Return a datetime-local value for yesterday at 00:00.
-     * @returns {string}
-     */
-    function getYesterdayStartLocalValue() {
-        const now = new Date();
-        now.setDate(now.getDate() - 1);
-        now.setHours(0, 0, 0, 0);
-        return toDatetimeLocalValue(now);
-    }
-
-    /**
-     * Return a datetime-local value for current local time.
-     * @returns {string}
-     */
-    function getNowLocalValue() {
-        return toDatetimeLocalValue(new Date());
-    }
-
-    /**
-     * Format a Date for datetime-local input values.
-     * @param {Date} date
-     * @returns {string}
-     */
-    function toDatetimeLocalValue(date) {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        const hours = String(date.getHours()).padStart(2, '0');
-        const minutes = String(date.getMinutes()).padStart(2, '0');
-        return `${year}-${month}-${day}T${hours}:${minutes}`;
-    }
-
-    /**
-     * Set default time filters: yesterday 00:00 to now.
-     */
-    function setDefaultTimeFilterValues() {
-        const start = document.getElementById('logTimeStart');
-        const end = document.getElementById('logTimeEnd');
-        if (!start || !end) return;
-
-        if (!start.value) {
-            start.value = getYesterdayStartLocalValue();
-        }
-        if (!end.value) {
-            end.value = getNowLocalValue();
-        }
-    }
-
-    /**
      * Draw a small histogram of visible log timestamps.
      * @param {Array<{timestamp:number|null}>} visibleEntries
-     * @param {'all'|'after'|'before'|'between'} mode
      * @param {number|null} startTs
      * @param {number|null} endTs
      */
-    function renderLogSpikeChart(visibleEntries, mode, startTs, endTs) {
+    function renderLogSpikeChart(visibleEntries, startTs, endTs) {
         const canvas = document.getElementById('logSpikeChart');
         if (!(canvas instanceof HTMLCanvasElement)) return;
 
@@ -250,7 +160,7 @@
         let windowEnd = endTs;
         const nowTs = Date.now();
 
-        if (mode === 'all') {
+        if (windowStart === null || windowEnd === null) {
             if (timestamps.length > 0) {
                 windowStart = Math.min(...timestamps);
                 windowEnd = Math.max(...timestamps);
@@ -258,15 +168,6 @@
                 windowEnd = nowTs;
                 windowStart = nowTs - 24 * 60 * 60 * 1000;
             }
-        } else if (mode === 'after') {
-            windowStart = startTs ?? (nowTs - 24 * 60 * 60 * 1000);
-            windowEnd = nowTs;
-        } else if (mode === 'before') {
-            windowEnd = endTs ?? nowTs;
-            windowStart = windowEnd - 24 * 60 * 60 * 1000;
-        } else {
-            windowStart = startTs ?? (nowTs - 24 * 60 * 60 * 1000);
-            windowEnd = endTs ?? nowTs;
         }
 
         if (windowStart === null || windowEnd === null || windowEnd <= windowStart) {

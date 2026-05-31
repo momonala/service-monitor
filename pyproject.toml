@@ -24,7 +24,7 @@ dependencies = [
 
 [tool.config]
 # Server settings
-flask_port = 5005
+flask_port = 5001
 
 [build-system]
 requires = ["hatchling"]

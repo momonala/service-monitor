@@ -119,9 +119,34 @@ def get_services(use_cache: bool = True) -> list[str]:
     return services
 
 
+def _format_uptime(raw: str) -> str:
+    """Convert systemd duration like '2 days 3h 15min 4s' to '2d 3h', capped at 2 parts."""
+    weeks = re.search(r"(\d+)\s*week", raw)
+    days = re.search(r"(\d+)\s*day", raw)
+    hours = re.search(r"(\d+)\s*h", raw)
+    minutes = re.search(r"(\d+)\s*min", raw)
+
+    total_days = int(days.group(1)) if days else 0
+    w = total_days // 7
+    d = total_days % 7
+
+    parts = []
+    if weeks:
+        w += int(weeks.group(1))
+    if w:
+        parts.append(f"{w}w")
+    if d:
+        parts.append(f"{d}d")
+    if hours:
+        parts.append(f"{hours.group(1)}h")
+    if minutes:
+        parts.append(f"{minutes.group(1)}m")
+    return " ".join(parts[:2]) if parts else raw
+
+
 def parse_uptime(status_text):
     match = re.search(r"Active: active \(running\) since .*?; (.*?) ago", status_text)
-    return match.group(1) if match else None
+    return _format_uptime(match.group(1)) if match else None
 
 
 def parse_memory(status_text):

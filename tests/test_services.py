@@ -30,8 +30,8 @@ def reset_service_caches():
 @pytest.mark.parametrize(
     "status_text,expected",
     [
-        ("Active: active (running) since Mon; 4 days ago", "4 days"),
-        ("Active: active (running) since Mon; 2h 15min ago", "2h 15min"),
+        ("Active: active (running) since Mon; 4 days ago", "4d"),
+        ("Active: active (running) since Mon; 2h 15min ago", "2h 15m"),
         ("Active: inactive (dead) since Mon; 4 days ago", None),
         ("", None),
     ],
@@ -125,7 +125,7 @@ def test_get_service_status(mock_get_info):
     )
     status = get_service_status("projects_test.service")
     assert status.is_active and not status.is_failed
-    assert status.uptime == "4 days" and status.memory == "123.4M"
+    assert status.uptime == "4d" and status.memory == "123.4M"
     assert status.project_group == "test"
 
     mock_get_info.return_value = "Active: failed (Result: exit-code)\nError: Connection refused\n"
