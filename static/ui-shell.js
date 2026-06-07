@@ -72,6 +72,8 @@
         sidebarOverlay?.classList.remove(CSS_CLASSES.OVERLAY_VISIBLE);
         mobileHamburger?.classList.remove(CSS_CLASSES.HIDDEN);
         document.body.style.overflow = '';
+        // Return focus to the hamburger so keyboard users don't lose their position
+        setTimeout(() => mobileHamburger?.focus(), 0);
     }
 
     function toggleDesktopSidebarCollapse() {

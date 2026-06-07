@@ -8,13 +8,11 @@
     <meta name="theme-color" content="#000000">
     <title>Service Monitor</title>
     <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.ico') }}">
-    
-    <!-- Performance optimizations -->
-    <link rel="preconnect" href="{{ url_for('static', filename='') }}">
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    
+
     <!-- Critical CSS for instant first paint -->
     <style>
         :root{--color-bg-primary:#000;--color-bg-secondary:#1c1c1e;--color-text-primary:#fff}
@@ -23,7 +21,7 @@
         .sidebar{background:#000}
         .hidden{display:none!important}
     </style>
-    
+
 
     <!-- Load full CSS async -->
     <link rel="preload" href="{{ url_for('static', filename='app.css') }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
@@ -74,7 +72,7 @@
 
     <div class="app-container">
         <!-- Sidebar -->
-        <aside id="sidebar" class="sidebar" role="navigation" aria-label="Service navigation">
+        <aside id="sidebar" class="sidebar" aria-label="Service navigation">
             <header class="sidebar__header">
                 <button id="sidebarToggle" class="icon-button sidebar__toggle" aria-label="Toggle sidebar" title="Collapse sidebar">
                     <svg aria-hidden="true"><use href="#icon-chevron-left"></use></svg>
@@ -84,7 +82,7 @@
                     <svg aria-hidden="true"><use href="#icon-close"></use></svg>
                 </button>
             </header>
-            
+
             <!-- Status Summary -->
             <div class="status-summary">
                 <div class="status-summary__item">
@@ -96,12 +94,12 @@
                     <span>{{ services|selectattr('is_failed')|list|length }} Failed</span>
                 </div>
             </div>
-            
+
             <!-- Search Services -->
             <div class="sidebar__search">
                 <input type="text" id="serviceSearch" placeholder="Search services..." aria-label="Search services">
             </div>
-            
+
             <nav class="sidebar__nav">
                 {% set ns = namespace(prev_group=None) %}
                 {% for svc in services %}
@@ -158,14 +156,18 @@
                 </h1>
                 <div class="content-header__actions">
                     {% if selected_service_info and current %}
-                    <form method="POST" action="/restart" onsubmit="return confirm('Restart {{ current }}?');">
+                    <form method="POST" action="/restart" data-service="{{ current }}"
+                          onsubmit="return confirm('Restart ' + this.dataset.service + '?');">
                         <input type="hidden" name="service" value="{{ current }}">
-                        <button type="submit" class="btn btn--danger" data-loading-text="Restarting...">Restart</button>
+                        <button type="submit" class="btn btn--danger" data-loading-text="Restarting..."
+                                aria-label="Restart {{ current }}">Restart</button>
                     </form>
                     {% if current == 'projects_inspector-detector.service' %}
-                    <form method="POST" action="/inspector-detector/check" onsubmit="return confirm('Run check_inspections now?');">
+                    <form method="POST" action="/inspector-detector/check"
+                          onsubmit="return confirm('Run check_inspections now?');">
                         <input type="hidden" name="service" value="{{ current }}">
-                        <button type="submit" class="btn btn--warning" data-loading-text="Checking...">Check Inspections</button>
+                        <button type="submit" class="btn btn--warning" data-loading-text="Checking..."
+                                aria-label="Run Check Inspections for {{ current }}">Check Inspections</button>
                     </form>
                     {% endif %}
                     {% endif %}

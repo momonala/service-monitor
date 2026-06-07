@@ -5,6 +5,8 @@ import requests
 from src.services import ServiceStatus
 from src.values import telegram_api_token, telegram_chat_id
 
+logger = logging.getLogger(__name__)
+
 MAX_STATUS_LENGTH = 4096 - 500  # Telegram limit is 4096, leave room for message template
 
 
@@ -40,12 +42,11 @@ def report_error_to_telegram(service_status: ServiceStatus) -> None:
         response = requests.post(url, data=payload)
         response.raise_for_status()
     except requests.RequestException as exc:
-        logging.error("Failed to send message to Telegram: %s", exc)
+        logger.error("Failed to send message to Telegram: %s", exc)
 
 
 def _escape_markdown(text: str) -> str:
-    """Escape special characters for Markdown."""
-    # Escape characters that have special meaning in Telegram Markdown
+    """Escape special characters for Telegram Markdown."""
     for char in ["*", "`", "["]:
         text = text.replace(char, "\\" + char)
     return text

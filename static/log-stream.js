@@ -2,7 +2,13 @@
     'use strict';
 
     const LOG_SPIKE_BUCKETS = 48;
+    const MAX_LOG_ENTRIES = 10000;
+    const RECONNECT_BASE_MS = 2000;
+    const RECONNECT_MAX_MS = 30000;
+
     let activeLogSource = null;
+    let reconnectDelay = RECONNECT_BASE_MS;
+    let reconnectTimer = null;
     const logEntries = [];
     let reverseDirection = false;
 
@@ -96,6 +102,7 @@
 
     /**
      * Setup event listeners for log filtering controls.
+     * Uses only 'change' to avoid double-firing on checkboxes/selects.
      */
     function setupLogFilters() {
         const ids = ['logTimeFilterMode', 'logTextFilter', 'logCaseSensitive', 'logReverseDirection'];
@@ -103,8 +110,9 @@
         for (const id of ids) {
             const control = document.getElementById(id);
             if (!control) continue;
-            control.addEventListener('input', applyLogFilters);
-            control.addEventListener('change', () => {
+            // Use 'input' for text fields, 'change' for everything else to avoid double-firing
+            const eventType = (control.type === 'text' || control.tagName === 'SELECT') ? 'input' : 'change';
+            control.addEventListener(eventType, () => {
                 if (id === 'logReverseDirection') syncLogDirection();
                 applyLogFilters();
             });
@@ -162,8 +170,8 @@
 
         if (windowStart === null || windowEnd === null) {
             if (timestamps.length > 0) {
-                windowStart = Math.min(...timestamps);
-                windowEnd = Math.max(...timestamps);
+                windowStart = timestamps.reduce((a, b) => Math.min(a, b));
+                windowEnd = timestamps.reduce((a, b) => Math.max(a, b));
             } else {
                 windowEnd = nowTs;
                 windowStart = nowTs - 24 * 60 * 60 * 1000;
@@ -187,7 +195,7 @@
             buckets[idx] += 1;
         }
 
-        const maxBucket = Math.max(...buckets, 1);
+        const maxBucket = buckets.reduce((a, b) => Math.max(a, b), 1);
         const gap = 1;
         const barWidth = (cssWidth - (LOG_SPIKE_BUCKETS - 1) * gap) / LOG_SPIKE_BUCKETS;
         const chartTop = 2;
@@ -261,6 +269,7 @@
     /**
      * Append a single log line to the stream panel.
      * Preserves user scroll position — only auto-scrolls when already at the bottom.
+     * Evicts oldest entries when MAX_LOG_ENTRIES is reached.
      * @param {HTMLElement} el
      * @param {string} line
      */
@@ -283,7 +292,13 @@
             element: span,
         });
 
-        applyLogFilters();
+        // Evict oldest entries when cap is reached
+        if (logEntries.length > MAX_LOG_ENTRIES) {
+            const removed = logEntries.splice(0, logEntries.length - MAX_LOG_ENTRIES);
+            for (const entry of removed) {
+                entry.element.remove();
+            }
+        }
 
         if (pinnedToEdge) {
             scrollToActiveEdge(el);
@@ -351,7 +366,7 @@
 
     /**
      * Open an SSE connection to /logs/stream for the current service.
-     * Closes any existing connection first.
+     * Closes any existing connection first. Reconnects on error with exponential backoff.
      */
     function setupLogStream() {
         const logEl = document.getElementById('logStream');
@@ -364,11 +379,19 @@
             activeLogSource.close();
             activeLogSource = null;
         }
+        if (reconnectTimer !== null) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
 
+        setLogStreamStatus('connecting', 'connecting…');
         const source = new EventSource(`/logs/stream?service=${encodeURIComponent(service)}`);
         activeLogSource = source;
 
-        source.onopen = () => setLogStreamStatus('connected', 'live');
+        source.onopen = () => {
+            reconnectDelay = RECONNECT_BASE_MS;
+            setLogStreamStatus('connected', 'live');
+        };
 
         source.onmessage = (evt) => {
             let line;
@@ -384,17 +407,27 @@
             setLogStreamStatus('error', 'disconnected');
             source.close();
             activeLogSource = null;
+            reconnectTimer = setTimeout(() => {
+                reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
+                setupLogStream();
+            }, reconnectDelay);
         };
 
         window.addEventListener('beforeunload', () => {
+            if (reconnectTimer !== null) clearTimeout(reconnectTimer);
             source.close();
         }, { once: true });
     }
 
+    let resizeFilterTimer = null;
+
     function init() {
         setupLogFilters();
         setupLogStream();
-        window.addEventListener('resize', applyLogFilters);
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeFilterTimer);
+            resizeFilterTimer = setTimeout(applyLogFilters, 150);
+        });
     }
 
     window.ServiceMonitorLogStream = {

@@ -11,15 +11,20 @@ dependencies = [
     "flask>=3.0.0",
     "schedule>=1.0.0",
     "requests",
+    "python-dotenv>=1.0.0",
+    "typer>=0.9.0",
+]
+
+[dependency-groups]
+dev = [
     "pytest>=8.0.0",
     "pytest-cov>=4.0.0",
     "black",
+    "ruff>=0.14.10",
+    "isort>=7.0.0",
     "jupyter>=1.1.1",
     "notebook>=7.5.1",
     "pandas>=2.3.3",
-    "ruff>=0.14.10",
-    "isort>=7.0.0",
-    "typer>=0.9.0",
 ]
 
 [tool.config]
@@ -41,6 +46,11 @@ config = "src.config:main"
 line-length = 110
 target-version = ['py312']
 include = '\.pyi?$'
+
+[tool.ruff]
+line-length = 110
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"

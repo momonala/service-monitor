@@ -7,6 +7,7 @@ import pytest
 
 from src.app import app
 from src.services import ServiceStatus
+from src.values import INSPECTOR_DETECTOR_CWD, INSPECTOR_DETECTOR_UV_PATH
 
 
 @pytest.fixture
@@ -55,8 +56,10 @@ def test_index_non_linux(mock_is_linux, client):
     assert response.status_code == 200
 
 
+@patch("src.app.is_linux", return_value=True)
+@patch("src.app.get_services", return_value=["projects_test.service"])
 @patch("src.app.subprocess.Popen")
-def test_restart_service(mock_popen, client):
+def test_restart_service(mock_popen, mock_get_services, mock_is_linux, client):
     """Restart service triggers systemctl and redirects without waiting."""
     response = client.post("/restart", data={"service": "projects_test.service"}, follow_redirects=False)
     assert response.status_code == 302
@@ -89,11 +92,11 @@ def test_inspector_detector_check(mock_run, client):
     )
     assert response.status_code == 302
     mock_run.assert_called_once_with(
-        ["/home/mnalavadi/.local/bin/uv", "run", "-m", "scripts.check_inspections"],
+        [INSPECTOR_DETECTOR_UV_PATH, "run", "-m", "scripts.check_inspections"],
         check=True,
         text=True,
         capture_output=True,
-        cwd="/home/mnalavadi/inspector_detector",
+        cwd=INSPECTOR_DETECTOR_CWD,
     )
 
     mock_run.side_effect = subprocess.CalledProcessError(1, "uv", stderr="Script failed")

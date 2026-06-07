@@ -1,22 +1,22 @@
 import json
 import logging
-import os
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from flask import Flask, Response, jsonify, redirect, render_template, request, stream_with_context, url_for
 
 from src.canned_info import canned_service_statuses, websites
 from src.scheduler import start_threads
 from src.services import get_info_for_service, get_service_health, get_service_status, get_services, is_linux
+from src.values import INSPECTOR_DETECTOR_CWD, INSPECTOR_DETECTOR_UV_PATH
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
-template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates")
-static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
-app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
+_base = Path(__file__).parent.parent
+app = Flask(__name__, template_folder=str(_base / "templates"), static_folder=str(_base / "static"))
 MAX_STATUS_WORKERS = 8
 
 
@@ -39,6 +39,12 @@ def restart_service():
     if not service:
         return "service parameter required", 400
 
+    if is_linux():
+        known = get_services(use_cache=True)
+        if service not in known:
+            logger.warning("Restart requested for unknown service: %s", service)
+            return f"Unknown service: {service}", 400
+
     try:
         # Requires appropriate sudoers configuration for the running user
         subprocess.Popen(
@@ -59,17 +65,10 @@ def restart_service():
 def inspector_detector_check():
     """Run the Inspector Detector inspections check command."""
     service = request.form.get("service", "")
-    cmd = [
-        "/home/mnalavadi/.local/bin/uv",
-        "run",
-        "-m",
-        "scripts.check_inspections",
-    ]
+    cmd = [INSPECTOR_DETECTOR_UV_PATH, "run", "-m", "scripts.check_inspections"]
 
     try:
-        result = subprocess.run(
-            cmd, check=True, text=True, capture_output=True, cwd="/home/mnalavadi/inspector_detector"
-        )
+        result = subprocess.run(cmd, check=True, text=True, capture_output=True, cwd=INSPECTOR_DETECTOR_CWD)
         logger.info("inspector-detector check completed. stdout: %s", (result.stdout or "").strip())
         if result.stderr:
             logger.warning("inspector-detector check stderr: %s", result.stderr.strip())

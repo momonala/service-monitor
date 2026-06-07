@@ -8,7 +8,6 @@ import src.services as services_module
 from src.canned_info import canned_service_statuses
 from src.services import (
     get_ci_status,
-    get_github_repo_name,
     get_info_for_service,
     get_service_status,
     get_services,
@@ -136,20 +135,6 @@ def test_get_service_status(mock_get_info):
     mock_get_info.return_value = "Active: inactive (dead)\n"
     status = get_service_status("projects_test.service")
     assert not status.is_active and not status.is_failed
-
-
-@pytest.mark.parametrize(
-    "project_group,expected",
-    [
-        ("atc-tour-extension", "atc-tour-extension"),
-        ("energy-monitor", "energy-monitor"),
-        ("bathroom-button", "bathroom-button"),
-        ("service-monitor", "service-monitor"),
-    ],
-)
-def test_get_github_repo_name(project_group, expected):
-    """Map project_group to GitHub repo name (1:1 mapping)."""
-    assert get_github_repo_name(project_group) == expected
 
 
 @patch("src.services.requests.get")

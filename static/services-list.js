@@ -3,8 +3,18 @@
 
     const AUTO_REFRESH_INTERVAL = 30000;
 
+    // Fixed muted palette for project group borders — consistent and intentional
+    const PROJECT_COLORS = [
+        '#4A9ECC',  // blue
+        '#6AAB7A',  // green
+        '#CC9A4A',  // amber
+        '#9A6ACC',  // purple
+        '#CC6A6A',  // red
+        '#4ACCB8',  // teal
+    ];
+
     /**
-     * Generate consistent color for a project group using golden ratio hashing.
+     * Deterministic color from fixed palette for a project group.
      * @param {string} projectGroup
      * @returns {string}
      */
@@ -12,29 +22,9 @@
         let hash = 0;
         for (let i = 0; i < projectGroup.length; i++) {
             hash = ((hash << 5) - hash) + projectGroup.charCodeAt(i);
-            hash = hash & hash;
+            hash |= 0;  // coerce to 32-bit integer
         }
-
-        const hue = ((Math.abs(hash) % 1000) * 0.618033988749895) % 1.0;
-        const s = 0.75;
-        const v = 0.95;
-        const c = v * s;
-        const x = c * (1 - Math.abs(((hue * 6) % 2) - 1));
-        const m = v - c;
-
-        let r;
-        let g;
-        let b;
-        const h = hue * 6;
-        if (h < 1) { r = c; g = x; b = 0; }
-        else if (h < 2) { r = x; g = c; b = 0; }
-        else if (h < 3) { r = 0; g = c; b = x; }
-        else if (h < 4) { r = 0; g = x; b = c; }
-        else if (h < 5) { r = x; g = 0; b = c; }
-        else { r = c; g = 0; b = x; }
-
-        const toHex = (n) => Math.round((n + m) * 255).toString(16).padStart(2, '0');
-        return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+        return PROJECT_COLORS[Math.abs(hash) % PROJECT_COLORS.length];
     }
 
     function applyProjectColors() {
@@ -67,7 +57,7 @@
             headers: { 'X-Requested-With': 'XMLHttpRequest' },
         })
             .then((res) => {
-                if (!res.ok) throw new Error('Failed to refresh');
+                if (!res.ok) throw new Error(`Refresh failed: ${res.status}`);
                 return res.text();
             })
             .then((html) => {
@@ -94,10 +84,20 @@
                     }
                 });
 
+                // Update status summary counts safely using text content only
                 const newSummary = doc.querySelector('.status-summary');
                 const currentSummary = document.querySelector('.status-summary');
                 if (newSummary && currentSummary) {
-                    currentSummary.innerHTML = newSummary.innerHTML;
+                    newSummary.querySelectorAll('.status-summary__item').forEach((newItem, i) => {
+                        const currentItem = currentSummary.querySelectorAll('.status-summary__item')[i];
+                        if (currentItem) {
+                            const newSpan = newItem.querySelector('span');
+                            const currentSpan = currentItem.querySelector('span');
+                            if (newSpan && currentSpan) {
+                                currentSpan.textContent = newSpan.textContent;
+                            }
+                        }
+                    });
                 }
 
                 window.ServiceMonitorSidebarDetails?.load();
@@ -108,12 +108,11 @@
                 }
             })
             .catch((err) => {
-                console.error('⚠️ Status refresh failed:', err);
+                console.error('Status refresh failed:', err);
             });
     }
 
     function startAutoRefresh() {
-        if (window.location.search.includes('service=')) return;
         setInterval(refreshServiceStatus, AUTO_REFRESH_INTERVAL);
     }
 

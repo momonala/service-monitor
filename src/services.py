@@ -7,12 +7,8 @@ from dataclasses import dataclass
 
 import requests
 
-try:
-    from src.values import GITHUB_TOKEN
-except ImportError:
-    GITHUB_TOKEN = None
+from src.values import GITHUB_TOKEN
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 SERVICES_CACHE_TTL_SECONDS = 5.0
@@ -54,11 +50,6 @@ def parse_service_name(service_name: str) -> tuple[str, str | None]:
     return (project_group, suffix)
 
 
-def get_github_repo_name(project_group: str) -> str:
-    """Map project_group to GitHub repo name."""
-    return project_group
-
-
 def get_ci_status(repo_name: str, use_cache: bool = True) -> str:
     """Get CI status from GitHub Actions API with a short TTL cache."""
     now = time.monotonic()
@@ -98,7 +89,7 @@ def get_ci_status(repo_name: str, use_cache: bool = True) -> str:
         return "error"
 
 
-def is_linux():
+def is_linux() -> bool:
     return platform.system() == "Linux"
 
 
@@ -110,10 +101,15 @@ def get_services(use_cache: bool = True) -> list[str]:
         if now - cached_at < SERVICES_CACHE_TTL_SECONDS:
             return cached_services
 
-    out = subprocess.check_output(
-        ["systemctl", "list-units", "--type=service", "--no-legend", "--plain", "projects_*"],
-        text=True,
-    )
+    try:
+        out = subprocess.check_output(
+            ["systemctl", "list-units", "--type=service", "--no-legend", "--plain", "projects_*"],
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        logger.warning("systemctl list-units failed: %s", exc)
+        return []
+
     services = [line.strip().split()[0] for line in out.strip().splitlines()]
     _services_cache = (now, services)
     return services
@@ -121,45 +117,44 @@ def get_services(use_cache: bool = True) -> list[str]:
 
 def _format_uptime(raw: str) -> str:
     """Convert systemd duration like '2 days 3h 15min 4s' to '2d 3h', capped at 2 parts."""
-    weeks = re.search(r"(\d+)\s*week", raw)
-    days = re.search(r"(\d+)\s*day", raw)
-    hours = re.search(r"(\d+)\s*h", raw)
-    minutes = re.search(r"(\d+)\s*min", raw)
+    weeks_match = re.search(r"(\d+)\s*week", raw)
+    days_match = re.search(r"(\d+)\s*day", raw)
+    hours_match = re.search(r"(\d+)\s*h", raw)
+    minutes_match = re.search(r"(\d+)\s*min", raw)
 
-    total_days = int(days.group(1)) if days else 0
-    w = total_days // 7
+    total_days = int(days_match.group(1)) if days_match else 0
+    explicit_weeks = int(weeks_match.group(1)) if weeks_match else 0
+    w = explicit_weeks + total_days // 7
     d = total_days % 7
 
     parts = []
-    if weeks:
-        w += int(weeks.group(1))
     if w:
         parts.append(f"{w}w")
     if d:
         parts.append(f"{d}d")
-    if hours:
-        parts.append(f"{hours.group(1)}h")
-    if minutes:
-        parts.append(f"{minutes.group(1)}m")
+    if hours_match:
+        parts.append(f"{hours_match.group(1)}h")
+    if minutes_match:
+        parts.append(f"{minutes_match.group(1)}m")
     return " ".join(parts[:2]) if parts else raw
 
 
-def parse_uptime(status_text):
+def parse_uptime(status_text: str) -> str | None:
     match = re.search(r"Active: active \(running\) since .*?; (.*?) ago", status_text)
     return _format_uptime(match.group(1)) if match else None
 
 
-def parse_memory(status_text):
+def parse_memory(status_text: str) -> str | None:
     match = re.search(r"Memory: (.*?)(?:\n|$)", status_text)
     return match.group(1).strip() if match else None
 
 
-def parse_cpu(status_text):
+def parse_cpu(status_text: str) -> str | None:
     match = re.search(r"CPU: (.*?)(?:\n|$)", status_text)
     return match.group(1).strip() if match else None
 
 
-def parse_last_error(status_text):
+def parse_last_error(status_text: str) -> str | None:
     match = re.search(r"Error: (.*?)(?:\n|$)", status_text)
     return match.group(1).strip() if match else None
 
@@ -202,17 +197,17 @@ def get_service_status(service: str, include_ci: bool = True, status_lines: int 
     status_text = get_info_for_service(service, lines=status_lines)
     project_group, suffix = parse_service_name(service)
     is_active = "active (running)" in status_text.lower()
+    is_failed = "active: failed" in status_text.lower()
 
     # Only fetch CI status for services without suffixes
     ci_status = None
     if include_ci and suffix is None:
-        repo_name = get_github_repo_name(project_group)
-        ci_status = get_ci_status(repo_name)
+        ci_status = get_ci_status(project_group)
 
     return ServiceStatus(
         name=service,
         is_active=is_active,
-        is_failed="failed (result: exit-code)" in status_text.lower(),
+        is_failed=is_failed,
         uptime=parse_uptime(status_text) if is_active else None,
         memory=parse_memory(status_text),
         cpu=parse_cpu(status_text),

@@ -7,3 +7,6 @@ telegram_chat_id = "0000000000"
 # Create at: https://github.com/settings/tokens
 # Required scope: public_repo (for public repos) or repo (for private repos)
 GITHUB_TOKEN = "ghp_dummy_token_for_testing"
+
+INSPECTOR_DETECTOR_UV_PATH = "/usr/bin/uv"
+INSPECTOR_DETECTOR_CWD = "/tmp/inspector_detector"
