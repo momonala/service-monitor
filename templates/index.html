@@ -57,8 +57,14 @@
         <symbol id="icon-alert-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
         </symbol>
-        <symbol id="icon-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10"/>
+        <symbol id="icon-pause-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="10" y2="9"/><line x1="14" y1="15" x2="14" y2="9"/>
+        </symbol>
+        <symbol id="icon-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </symbol>
+        <symbol id="icon-bell-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.888 17.888 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" y1="1" x2="23" y2="23"/>
         </symbol>
     </svg>
 
@@ -93,6 +99,10 @@
                     <svg class="status-icon status-icon--failed" aria-hidden="true"><use href="#icon-alert-circle"></use></svg>
                     <span>{{ services|selectattr('is_failed')|list|length }} Failed</span>
                 </div>
+                <div class="status-summary__item">
+                    <svg class="status-icon status-icon--inactive" aria-hidden="true"><use href="#icon-pause-circle"></use></svg>
+                    <span>{{ services|rejectattr('is_active')|rejectattr('is_failed')|list|length }} Inactive</span>
+                </div>
             </div>
 
             <!-- Search Services -->
@@ -114,7 +124,7 @@
                         <a href="?service={{ svc.name }}" class="service-link">
                             <svg class="status-icon {% if svc.is_active %}status-icon--active{% elif svc.is_failed %}status-icon--failed{% else %}status-icon--inactive{% endif %}"
                                  aria-label="{% if svc.is_active %}Active{% elif svc.is_failed %}Failed{% else %}Inactive{% endif %}">
-                                <use href="#icon-{% if svc.is_active %}activity{% elif svc.is_failed %}alert-circle{% else %}circle{% endif %}"></use>
+                                <use href="#icon-{% if svc.is_active %}activity{% elif svc.is_failed %}alert-circle{% else %}pause-circle{% endif %}"></use>
                             </svg>
                             <span class="service-name">
                                 {%- set _parts = svc.name.split('_', 1) -%}
@@ -123,6 +133,8 @@
                                     {%- set _rest = _parts[1] -%}
                                     {%- if _rest.endswith('.service') -%}
                                         <span class="sn-dim">{{ _prefix }}</span><span class="sn-core">{{ _rest[:-8] }}</span><span class="sn-dim">.service</span>
+                                    {%- elif _rest.endswith('.timer') -%}
+                                        <span class="sn-dim">{{ _prefix }}</span><span class="sn-core">{{ _rest[:-6] }}</span><span class="sn-dim">.timer</span>
                                     {%- else -%}
                                         <span class="sn-dim">{{ _prefix }}</span><span class="sn-core">{{ _rest }}</span>
                                     {%- endif -%}
@@ -155,6 +167,9 @@
                     {% if current %}{{ current }}{% else %}Dashboard{% endif %}
                 </h1>
                 <div class="content-header__actions">
+                    {% if current %}
+                    <div id="alertSettingsControl" data-service="{{ current }}"></div>
+                    {% endif %}
                     {% if selected_service_info and current %}
                     <form method="POST" action="/restart" data-service="{{ current }}"
                           onsubmit="return confirm('Restart ' + this.dataset.service + '?');">
@@ -181,15 +196,9 @@
                     <pre class="service-info service-info--status">{{ selected_service_info }}</pre>
                 </div>
                 <div class="log-stream-panel">
-                    <div class="log-stream-header">
-                        <span class="log-stream-title">Live Logs</span>
-                        <span id="logLineCounter" class="log-stream-counter" aria-live="polite">0 lines</span>
-                        <span id="logStreamStatus" class="log-stream-badge log-stream-badge--connecting" aria-live="polite">connecting…</span>
-                    </div>
                     <div class="log-filters" aria-label="Log filters">
                         <label class="log-filter-field">
-                            <span>Window</span>
-                            <select id="logTimeFilterMode">
+                            <select id="logTimeFilterMode" aria-label="Log time window">
                                 <option value="last5m">Last 5 min</option>
                                 <option value="last15m">Last 15 min</option>
                                 <option value="last30m" selected>Last 30 min</option>
@@ -199,17 +208,18 @@
                             </select>
                         </label>
                         <label class="log-filter-field log-filter-field--wide">
-                            <span>Text contains</span>
-                            <input id="logTextFilter" type="text" placeholder="e.g. werkzeug">
+                            <input id="logTextFilter" type="text" placeholder="e.g. werkzeug" aria-label="Filter logs by text">
                         </label>
-                        <label class="log-filter-checkbox">
-                            <input id="logCaseSensitive" type="checkbox">
-                            <span>Aa</span>
-                        </label>
-                        <label class="log-filter-checkbox">
-                            <input id="logReverseDirection" type="checkbox">
-                            <span>Newest first</span>
-                        </label>
+                        <div class="log-filter-toggles">
+                            <label class="log-filter-checkbox">
+                                <input id="logCaseSensitive" type="checkbox">
+                                <span>Aa</span>
+                            </label>
+                            <label class="log-filter-checkbox">
+                                <input id="logReverseDirection" type="checkbox">
+                                <span>Newest first</span>
+                            </label>
+                        </div>
                     </div>
                     <div class="log-chart-panel">
                         <canvas id="logSpikeChart" class="log-spike-chart" height="42" aria-label="Log spike timeline"></canvas>

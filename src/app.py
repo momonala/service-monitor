@@ -7,7 +7,7 @@ from pathlib import Path
 from flask import Flask, Response, jsonify, redirect, render_template, request, stream_with_context, url_for
 
 from src.canned_info import canned_service_statuses, websites
-from src.scheduler import start_threads
+from src.scheduler import VALID_FREQUENCIES, get_all_alert_settings, set_alert_frequency, start_scheduler
 from src.services import get_info_for_service, get_service_health, get_service_status, get_services, is_linux
 from src.values import INSPECTOR_DETECTOR_CWD, INSPECTOR_DETECTOR_UV_PATH
 
@@ -114,6 +114,26 @@ def stream_logs():
     )
 
 
+@app.route("/api/alert-settings")
+def get_alert_settings():
+    """Return alert frequency settings for all known services, defaulting unknown ones to 'hourly'."""
+    services = get_services(use_cache=True) if is_linux() else []
+    settings = get_all_alert_settings()
+    return jsonify({svc: settings.get(svc, "hourly") for svc in services})
+
+
+@app.route("/api/alert-settings", methods=["POST"])
+def update_alert_setting():
+    """Update the alert frequency for a single service. Expects JSON {service, frequency}."""
+    data = request.get_json(silent=True) or {}
+    service = data.get("service", "")
+    frequency = data.get("frequency", "")
+    if not service or frequency not in VALID_FREQUENCIES:
+        return "Invalid request", 400
+    set_alert_frequency(service, frequency)
+    return jsonify({"ok": True})
+
+
 @app.route("/api/services/sidebar-details")
 def sidebar_details():
     """Return enriched service details for sidebar rendering after first paint."""
@@ -161,7 +181,7 @@ def index():
 
 
 def main():
-    start_threads()
+    start_scheduler()
     app.run(host="0.0.0.0", port=5001, debug=False)
 
 

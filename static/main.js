@@ -8,6 +8,9 @@
         window.ServiceMonitorSidebarDetails?.load().catch((error) => {
             console.error('⚠️ Sidebar details load failed:', error);
         });
+        window.ServiceMonitorSidebarDetails?.loadAlertSettings().catch((error) => {
+            console.error('⚠️ Alert settings load failed:', error);
+        });
     }
 
     if (document.readyState === 'loading') {

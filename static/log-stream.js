@@ -96,7 +96,6 @@
             }
         }
 
-        updateLogCounter(visibleCount, logEntries.length);
         renderLogSpikeChart(visibleEntries, startTs, endTs);
     }
 
@@ -120,17 +119,6 @@
 
         syncLogDirection();
         applyLogFilters();
-    }
-
-    /**
-     * Render line counter for visible vs total log lines.
-     * @param {number} visibleCount
-     * @param {number} totalCount
-     */
-    function updateLogCounter(visibleCount, totalCount) {
-        const counter = document.getElementById('logLineCounter');
-        if (!counter) return;
-        counter.textContent = `${visibleCount}/${totalCount} lines`;
     }
 
     /**
@@ -255,18 +243,6 @@
     }
 
     /**
-     * Update the connection status badge.
-     * @param {'connecting'|'connected'|'error'} state
-     * @param {string} [label]
-     */
-    function setLogStreamStatus(state, label) {
-        const badge = document.getElementById('logStreamStatus');
-        if (!badge) return;
-        badge.className = `log-stream-badge log-stream-badge--${state}`;
-        badge.textContent = label ?? state;
-    }
-
-    /**
      * Append a single log line to the stream panel.
      * Preserves user scroll position — only auto-scrolls when already at the bottom.
      * Evicts oldest entries when MAX_LOG_ENTRIES is reached.
@@ -384,13 +360,11 @@
             reconnectTimer = null;
         }
 
-        setLogStreamStatus('connecting', 'connecting…');
         const source = new EventSource(`/logs/stream?service=${encodeURIComponent(service)}`);
         activeLogSource = source;
 
         source.onopen = () => {
             reconnectDelay = RECONNECT_BASE_MS;
-            setLogStreamStatus('connected', 'live');
         };
 
         source.onmessage = (evt) => {
@@ -404,7 +378,6 @@
         };
 
         source.onerror = () => {
-            setLogStreamStatus('error', 'disconnected');
             source.close();
             activeLogSource = null;
             reconnectTimer = setTimeout(() => {

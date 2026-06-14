@@ -33,7 +33,7 @@ class ServiceStatus:
 
 
 def parse_service_name(service_name: str) -> tuple[str, str | None]:
-    """Parse service name to extract project group and optional suffix.
+    """Parse unit name to extract project group and optional suffix.
 
     Returns:
         tuple[str, str | None]: (project_group, suffix) where suffix is None if no suffix exists.
@@ -41,8 +41,12 @@ def parse_service_name(service_name: str) -> tuple[str, str | None]:
     Examples:
         'projects_energy-monitor.service' -> ('energy-monitor', None)
         'projects_energy-monitor_data-backup-scheduler.service' -> ('energy-monitor', 'data-backup-scheduler')
+        'projects_claude-usage-notch-server_ping.timer' -> ('claude-usage-notch-server', 'ping')
     """
-    service_name = service_name.replace(".service", "")
+    for suffix in (".service", ".timer"):
+        if service_name.endswith(suffix):
+            service_name = service_name[: -len(suffix)]
+            break
     service_name = service_name.replace("projects_", "")
     parts = service_name.split("_")
     project_group = parts[0]
@@ -93,6 +97,20 @@ def is_linux() -> bool:
     return platform.system() == "Linux"
 
 
+def _list_systemd_units(unit_types: list[str]) -> list[str]:
+    """Return loaded project units for the given systemd unit types."""
+    cmd = ["systemctl", "list-units", "--no-legend", "--plain", "--all"]
+    for unit_type in unit_types:
+        cmd.extend(["--type", unit_type])
+    cmd.append("projects_*")
+    try:
+        out = subprocess.check_output(cmd, text=True)
+    except subprocess.CalledProcessError as exc:
+        logger.warning("systemctl list-units failed: %s", exc)
+        return []
+    return [line.strip().split()[0] for line in out.strip().splitlines() if line.strip()]
+
+
 def get_services(use_cache: bool = True) -> list[str]:
     global _services_cache
     now = time.monotonic()
@@ -101,18 +119,9 @@ def get_services(use_cache: bool = True) -> list[str]:
         if now - cached_at < SERVICES_CACHE_TTL_SECONDS:
             return cached_services
 
-    try:
-        out = subprocess.check_output(
-            ["systemctl", "list-units", "--type=service", "--no-legend", "--plain", "projects_*"],
-            text=True,
-        )
-    except subprocess.CalledProcessError as exc:
-        logger.warning("systemctl list-units failed: %s", exc)
-        return []
-
-    services = [line.strip().split()[0] for line in out.strip().splitlines()]
-    _services_cache = (now, services)
-    return services
+    units = sorted(set(_list_systemd_units(["service", "timer"])))
+    _services_cache = (now, units)
+    return units
 
 
 def _format_uptime(raw: str) -> str:
@@ -142,6 +151,17 @@ def _format_uptime(raw: str) -> str:
 def parse_uptime(status_text: str) -> str | None:
     match = re.search(r"Active: active \(running\) since .*?; (.*?) ago", status_text)
     return _format_uptime(match.group(1)) if match else None
+
+
+def parse_timer_next(status_text: str) -> str | None:
+    """Parse time until next trigger from timer status output."""
+    match = re.search(r"Trigger:.*?;\s*(.+?)\s+left", status_text)
+    return _format_uptime(match.group(1)) if match else None
+
+
+def _parse_is_active(status_text: str) -> bool:
+    """Return True for running services and waiting timers."""
+    return bool(re.search(r"Active:\s+active\s+\(", status_text, re.IGNORECASE))
 
 
 def parse_memory(status_text: str) -> str | None:
@@ -196,19 +216,26 @@ def get_service_health(service: str) -> ServiceStatus:
 def get_service_status(service: str, include_ci: bool = True, status_lines: int = 0) -> ServiceStatus:
     status_text = get_info_for_service(service, lines=status_lines)
     project_group, suffix = parse_service_name(service)
-    is_active = "active (running)" in status_text.lower()
+    is_active = _parse_is_active(status_text)
     is_failed = "active: failed" in status_text.lower()
+    is_timer = service.endswith(".timer")
 
-    # Only fetch CI status for services without suffixes
+    # Only fetch CI status for primary project services (no suffix, not a timer)
     ci_status = None
-    if include_ci and suffix is None:
+    if include_ci and suffix is None and not is_timer:
         ci_status = get_ci_status(project_group)
+
+    uptime = None
+    if is_active:
+        uptime = parse_uptime(status_text)
+    if is_timer and uptime is None:
+        uptime = parse_timer_next(status_text)
 
     return ServiceStatus(
         name=service,
         is_active=is_active,
         is_failed=is_failed,
-        uptime=parse_uptime(status_text) if is_active else None,
+        uptime=uptime,
         memory=parse_memory(status_text),
         cpu=parse_cpu(status_text),
         last_error=parse_last_error(status_text),

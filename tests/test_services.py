@@ -15,6 +15,7 @@ from src.services import (
     parse_last_error,
     parse_memory,
     parse_service_name,
+    parse_timer_next,
     parse_uptime,
 )
 
@@ -91,15 +92,27 @@ def test_parse_service_name(service):
 
 @patch("src.services.subprocess.check_output")
 def test_get_services(mock_check_output):
-    """Parse systemctl list-units output and handle empty output."""
+    """Parse systemctl list-units output for services and timers."""
     mock_check_output.return_value = (
         "projects_test1.service       loaded active running   Test Service 1\n"
         "projects_test2.service       loaded active running   Test Service 2\n"
+        "projects_test_ping.timer     loaded active waiting   Daily ping timer\n"
     )
-    assert get_services(use_cache=False) == ["projects_test1.service", "projects_test2.service"]
+    assert get_services(use_cache=False) == [
+        "projects_test1.service",
+        "projects_test2.service",
+        "projects_test_ping.timer",
+    ]
 
     mock_check_output.return_value = ""
     assert get_services(use_cache=False) == []
+
+
+def test_parse_service_name_timer():
+    """Parse timer unit names the same way as service units."""
+    project_group, suffix = parse_service_name("projects_claude-usage-notch-server_ping.timer")
+    assert project_group == "claude-usage-notch-server"
+    assert suffix == "ping"
 
 
 @patch("src.services.subprocess.run")
@@ -135,6 +148,27 @@ def test_get_service_status(mock_get_info):
     mock_get_info.return_value = "Active: inactive (dead)\n"
     status = get_service_status("projects_test.service")
     assert not status.is_active and not status.is_failed
+
+    mock_get_info.return_value = (
+        "Active: active (waiting) since Mon 2025-06-09 10:00:00 UTC; 5 days ago\n"
+        "Trigger: Thu 2025-06-19 10:00:00 UTC; 1 day 2h left\n"
+    )
+    status = get_service_status("projects_test_ping.timer")
+    assert status.is_active and not status.is_failed
+    assert status.uptime == "1d 2h"
+    assert status.project_group == "test"
+
+
+@pytest.mark.parametrize(
+    "status_text,expected",
+    [
+        ("Trigger: Thu 2025-06-19 10:00:00 UTC; 1 day 2h left\n", "1d 2h"),
+        ("Active: active (waiting) since Mon; 5 days ago\n", None),
+    ],
+)
+def test_parse_timer_next(status_text, expected):
+    """Parse time until next timer trigger."""
+    assert parse_timer_next(status_text) == expected
 
 
 @patch("src.services.requests.get")
