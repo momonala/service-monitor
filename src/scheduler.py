@@ -30,7 +30,7 @@ def _load_settings() -> None:
         with _alert_lock:
             _alert_settings.update({k: v for k, v in data.items() if v in VALID_FREQUENCIES})
     except Exception:
-        logger.warning("Failed to load alert settings from %s", _SETTINGS_FILE)
+        logger.warning("Failed to load alert settings from %s", _SETTINGS_FILE, exc_info=True)
 
 
 def _save_settings() -> None:
@@ -41,7 +41,7 @@ def _save_settings() -> None:
         tmp.write_text(json.dumps(data, indent=2))
         tmp.replace(_SETTINGS_FILE)
     except Exception:
-        logger.warning("Failed to save alert settings to %s", _SETTINGS_FILE)
+        logger.warning("Failed to save alert settings to %s", _SETTINGS_FILE, exc_info=True)
 
 
 _load_settings()

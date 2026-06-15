@@ -128,19 +128,28 @@
             select.appendChild(opt);
         }
         select.value = frequency;
+        select.dataset.committed = frequency;
 
         select.addEventListener('change', async (e) => {
             const newFrequency = e.target.value;
+            const prevFrequency = select.dataset.committed ?? 'hourly';
             try {
-                await fetch('/api/alert-settings', {
+                const res = await fetch('/api/alert-settings', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ service: serviceName, frequency: newFrequency }),
                 });
+                if (!res.ok) {
+                    console.error('Failed to save alert setting, reverting');
+                    select.value = prevFrequency;
+                    return;
+                }
+                select.dataset.committed = newFrequency;
                 const sidebarItem = document.querySelector(`.service-item[data-service-name="${CSS.escape(serviceName)}"]`);
                 if (sidebarItem) updateAlertBadge(sidebarItem, newFrequency);
             } catch (err) {
                 console.error('Failed to update alert setting:', err);
+                select.value = prevFrequency;
             }
         });
 

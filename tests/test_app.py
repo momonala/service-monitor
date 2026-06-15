@@ -129,3 +129,58 @@ def test_sidebar_details(mock_get_status, mock_get_services, mock_is_linux, clie
     payload = response.get_json()
     assert payload["services"][0]["name"] == "projects_test1.service"
     assert payload["services"][0]["ci_status"] == "success"
+
+
+@patch("src.app.is_linux", return_value=True)
+@patch("src.app.get_services", return_value=["projects_test1.service"])
+def test_alert_settings_get(mock_get_services, mock_is_linux, client):
+    """GET /api/alert-settings returns per-service frequencies, defaulting to hourly."""
+    import src.scheduler as sched
+
+    sched._alert_settings.clear()
+    response = client.get("/api/alert-settings")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["projects_test1.service"] == "hourly"
+
+
+@patch("src.app.is_linux", return_value=True)
+@patch("src.app.get_services", return_value=["projects_test1.service"])
+def test_alert_settings_post_mute_and_restore(mock_get_services, mock_is_linux, client):
+    """POST /api/alert-settings saves frequency; muted setting persists in memory."""
+    import src.scheduler as sched
+
+    sched._alert_settings.clear()
+
+    response = client.post(
+        "/api/alert-settings",
+        json={"service": "projects_test1.service", "frequency": "muted"},
+    )
+    assert response.status_code == 200
+    assert response.get_json() == {"ok": True}
+    assert sched._alert_settings.get("projects_test1.service") == "muted"
+
+    # Confirm GET reflects the muted state
+    response = client.get("/api/alert-settings")
+    assert response.get_json()["projects_test1.service"] == "muted"
+
+    # Restore to hourly
+    client.post(
+        "/api/alert-settings",
+        json={"service": "projects_test1.service", "frequency": "hourly"},
+    )
+    assert sched._alert_settings.get("projects_test1.service") == "hourly"
+
+
+def test_alert_settings_post_invalid(client):
+    """POST /api/alert-settings rejects missing or invalid inputs."""
+    response = client.post("/api/alert-settings", json={"service": "", "frequency": "muted"})
+    assert response.status_code == 400
+
+    response = client.post(
+        "/api/alert-settings", json={"service": "projects_test1.service", "frequency": "never"}
+    )
+    assert response.status_code == 400
+
+    response = client.post("/api/alert-settings", data="not json", content_type="text/plain")
+    assert response.status_code == 400
