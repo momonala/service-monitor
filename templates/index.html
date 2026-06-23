@@ -66,6 +66,21 @@
         <symbol id="icon-bell-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.888 17.888 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" y1="1" x2="23" y2="23"/>
         </symbol>
+        <symbol id="icon-thermometer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/>
+        </symbol>
+        <symbol id="icon-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2"/>
+        </symbol>
+        <symbol id="icon-memory" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 19v-3M10 19v-3M14 19v-3M18 19v-3M8 11V9M16 11V9M12 11V9M2 15h20"/><path d="M2 7a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v1.1a2 2 0 0 0 0 3.837V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5.1a2 2 0 0 0 0-3.837Z"/>
+        </symbol>
+        <symbol id="icon-disk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/>
+        </symbol>
+        <symbol id="icon-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+        </symbol>
     </svg>
 
     <!-- Mobile Overlay (backdrop when sidebar is open) -->
@@ -228,17 +243,32 @@
                 </div>
                 {% else %}
                 <!-- Dashboard Home View -->
-                <div class="website-pills">
-                    {% for website in websites %}
-                    <a href="{{ website.url }}"
-                       target="_blank"
-                       rel="noopener noreferrer"
-                       class="website-pill"
-                       data-project-group="{{ website.name }}">
-                        <span>{{ website.name }}</span>
-                        <svg class="website-pill__external" aria-hidden="true"><use href="#icon-external"></use></svg>
-                    </a>
-                    {% endfor %}
+                <div class="dashboard-home">
+                    <section class="dash-section" aria-labelledby="systemHeading">
+                        <div class="dash-section__head">
+                            <h2 id="systemHeading" class="dash-section__title">System</h2>
+                            <span id="systemMeta" class="dash-section__meta"></span>
+                        </div>
+                        <div id="systemMetrics" class="metric-grid" aria-busy="true" aria-live="polite">
+                            <p class="metric-grid__placeholder">Loading system info…</p>
+                        </div>
+                    </section>
+
+                    <section class="dash-section" aria-labelledby="sitesHeading">
+                        <h2 id="sitesHeading" class="dash-section__title">Sites</h2>
+                        <div class="website-pills">
+                            {% for website in websites %}
+                            <a href="{{ website.url }}"
+                               target="_blank"
+                               rel="noopener noreferrer"
+                               class="website-pill"
+                               data-project-group="{{ website.name }}">
+                                <span>{{ website.name }}</span>
+                                <svg class="website-pill__external" aria-hidden="true"><use href="#icon-external"></use></svg>
+                            </a>
+                            {% endfor %}
+                        </div>
+                    </section>
                 </div>
                 {% endif %}
             </div>
@@ -253,6 +283,7 @@
     <script src="{{ url_for('static', filename='services-list.js') }}" defer></script>
     <script src="{{ url_for('static', filename='log-stream.js') }}" defer></script>
     <script src="{{ url_for('static', filename='sidebar-details.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='system-info.js') }}" defer></script>
     <script src="{{ url_for('static', filename='main.js') }}" defer></script>
 </body>
 </html>

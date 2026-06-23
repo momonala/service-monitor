@@ -1,9 +1,12 @@
 import logging
+import os
 import platform
 import re
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import requests
 
@@ -244,3 +247,132 @@ def get_service_status(service: str, include_ci: bool = True, status_lines: int 
         suffix=suffix,
         ci_status=ci_status,
     )
+
+
+@dataclass
+class SystemInfo:
+    """Host (Raspberry Pi) vitals, read live from /proc and /sys. All fields optional;
+    a field is None when the underlying source is unavailable (e.g. running off-Pi)."""
+
+    hostname: str
+    uptime: str | None
+    temperature_c: float | None
+    cpu_percent: float | None
+    load_avg: float | None  # 1-minute load average
+    cpu_count: int | None
+    memory_used_pct: float | None
+    memory_used_mb: int | None
+    memory_total_mb: int | None
+    disk_used_pct: float | None
+    disk_used_gb: float | None
+    disk_total_gb: float | None
+
+
+def _read_cpu_temperature() -> float | None:
+    """CPU temperature in Celsius from the kernel thermal zone (millidegrees)."""
+    try:
+        millidegrees = Path("/sys/class/thermal/thermal_zone0/temp").read_text().strip()
+        return round(int(millidegrees) / 1000, 1)
+    except (OSError, ValueError):
+        return None
+
+
+def _read_proc_stat_busy_total() -> tuple[int, int] | None:
+    """Return (busy, total) jiffies from the aggregate 'cpu' line of /proc/stat."""
+    try:
+        first_line = Path("/proc/stat").read_text().splitlines()[0]
+    except (OSError, IndexError):
+        return None
+    fields = [int(v) for v in first_line.split()[1:]]
+    if len(fields) < 4:
+        return None
+    idle = fields[3] + (fields[4] if len(fields) > 4 else 0)  # idle + iowait
+    total = sum(fields)
+    return total - idle, total
+
+
+def _read_cpu_percent() -> float | None:
+    """Instantaneous CPU utilization, sampled over a short window from /proc/stat."""
+    first = _read_proc_stat_busy_total()
+    if first is None:
+        return None
+    time.sleep(0.1)
+    second = _read_proc_stat_busy_total()
+    if second is None:
+        return None
+    busy_delta = second[0] - first[0]
+    total_delta = second[1] - first[1]
+    if total_delta <= 0:
+        return None
+    return round(max(0.0, min(100.0, busy_delta / total_delta * 100)), 1)
+
+
+def _read_memory() -> tuple[int, int, float] | None:
+    """Return (used_mb, total_mb, used_pct) parsed from /proc/meminfo."""
+    try:
+        meminfo = Path("/proc/meminfo").read_text()
+    except OSError:
+        return None
+    values = {}
+    for line in meminfo.splitlines():
+        key, _, rest = line.partition(":")
+        if key in ("MemTotal", "MemAvailable"):
+            values[key] = int(rest.strip().split()[0])  # value is in kB
+    if "MemTotal" not in values or "MemAvailable" not in values:
+        return None
+    total_kb = values["MemTotal"]
+    used_kb = total_kb - values["MemAvailable"]
+    return round(used_kb / 1024), round(total_kb / 1024), round(used_kb / total_kb * 100, 1)
+
+
+def get_system_info() -> SystemInfo:
+    """Collect host vitals. Cheap enough to call per dashboard poll (~100ms for the CPU sample)."""
+    memory = _read_memory()
+    try:
+        load_avg: float | None = round(os.getloadavg()[0], 2)
+    except (OSError, AttributeError):
+        load_avg = None
+
+    disk_used_pct = disk_used_gb = disk_total_gb = None
+    try:
+        usage = shutil.disk_usage("/")
+        gb = 1024**3
+        disk_total_gb = round(usage.total / gb, 1)
+        disk_used_gb = round(usage.used / gb, 1)
+        disk_used_pct = round(usage.used / usage.total * 100, 1)
+    except OSError:
+        pass
+
+    return SystemInfo(
+        hostname=platform.node(),
+        uptime=_read_uptime(),
+        temperature_c=_read_cpu_temperature(),
+        cpu_percent=_read_cpu_percent(),
+        load_avg=load_avg,
+        cpu_count=os.cpu_count(),
+        memory_used_mb=memory[0] if memory else None,
+        memory_total_mb=memory[1] if memory else None,
+        memory_used_pct=memory[2] if memory else None,
+        disk_used_pct=disk_used_pct,
+        disk_used_gb=disk_used_gb,
+        disk_total_gb=disk_total_gb,
+    )
+
+
+def _read_uptime() -> str | None:
+    """Host uptime as a compact human string (e.g. '3d 4h'), from /proc/uptime."""
+    try:
+        seconds = float(Path("/proc/uptime").read_text().split()[0])
+    except (OSError, ValueError, IndexError):
+        return None
+    minutes, _ = divmod(int(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    days, hours = divmod(hours, 24)
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes and not days:
+        parts.append(f"{minutes}m")
+    return " ".join(parts[:2]) if parts else "0m"

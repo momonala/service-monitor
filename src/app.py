@@ -2,13 +2,21 @@ import json
 import logging
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, redirect, render_template, request, stream_with_context, url_for
 
-from src.canned_info import canned_service_statuses, websites
+from src.canned_info import canned_service_statuses, canned_system_info, websites
 from src.scheduler import VALID_FREQUENCIES, get_all_alert_settings, set_alert_frequency, start_scheduler
-from src.services import get_info_for_service, get_service_health, get_service_status, get_services, is_linux
+from src.services import (
+    get_info_for_service,
+    get_service_health,
+    get_service_status,
+    get_services,
+    get_system_info,
+    is_linux,
+)
 from src.values import INSPECTOR_DETECTOR_CWD, INSPECTOR_DETECTOR_UV_PATH
 
 logging.basicConfig(level=logging.INFO)
@@ -156,6 +164,19 @@ def sidebar_details():
         for status in detailed_statuses
     ]
     return jsonify({"services": payload})
+
+
+@app.route("/api/system-info")
+def system_info():
+    """Return host (Raspberry Pi) vitals as JSON: temperature, CPU, memory, disk, uptime."""
+    try:
+        info = get_system_info() if is_linux() else canned_system_info
+    except Exception:
+        logger.exception("Failed to collect system info")
+        return jsonify({"error": "failed to collect system info"}), 500
+    payload = asdict(info)
+    logger.info("system-info: %s", payload)
+    return jsonify(payload)
 
 
 @app.route("/")

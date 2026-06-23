@@ -65,6 +65,10 @@
 
     /* Panel inset padding (log panel, service info) */
     --spacing-panel: 1.25rem;
+
+    /* System metric usage bars */
+    --color-metric-track: rgba(255, 255, 255, 0.08);
+    --color-metric-fill:  rgba(235, 235, 245, 0.45);
 }
 
 @media (min-width: 640px) {
@@ -619,6 +623,117 @@ textarea:focus-visible {
     opacity: 0.9;
 }
 
+
+/* ============================================
+   Dashboard Home (system vitals + sites)
+   ============================================ */
+.dashboard-home {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xl);
+    animation: fadeIn 0.3s ease-out;
+}
+
+.dash-section__head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+}
+
+.dash-section__title {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    margin: 0 0 var(--spacing-md);
+}
+
+.dash-section__head .dash-section__title {
+    margin: 0;
+}
+
+.dash-section__meta {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+}
+
+.metric-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+    gap: var(--spacing-md);
+}
+
+.metric-grid__placeholder {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-sm);
+}
+
+.metric {
+    padding: var(--spacing-md);
+    background: var(--color-bg-panel);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+}
+
+.metric__head {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    color: var(--color-text-muted);
+    margin-bottom: var(--spacing-sm);
+}
+
+.metric__icon {
+    width: var(--status-icon-size);
+    height: var(--status-icon-size);
+    flex-shrink: 0;
+}
+
+.metric__label {
+    font-size: var(--font-size-xs);
+    font-weight: 500;
+    letter-spacing: 0.02em;
+}
+
+.metric__value {
+    font-size: var(--font-size-xl);
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--color-text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.metric__sub {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+    min-height: 1em;
+    margin-top: 0.125rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.metric__bar {
+    height: 4px;
+    margin-top: var(--spacing-sm);
+    background: var(--color-metric-track);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+.metric__bar > span {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: var(--color-metric-fill);
+    transition: width var(--transition-normal), background-color var(--transition-fast);
+}
+
+.metric--warn .metric__value { color: var(--color-warning); }
+.metric--warn .metric__bar > span { background: var(--color-warning); }
+.metric--crit .metric__value { color: var(--color-status-failed); }
+.metric--crit .metric__bar > span { background: var(--color-status-failed); }
 
 .website-pills {
     display: flex;

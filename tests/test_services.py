@@ -7,10 +7,12 @@ import pytest
 import src.services as services_module
 from src.canned_info import canned_service_statuses
 from src.services import (
+    SystemInfo,
     get_ci_status,
     get_info_for_service,
     get_service_status,
     get_services,
+    get_system_info,
     parse_cpu,
     parse_last_error,
     parse_memory,
@@ -275,3 +277,50 @@ def test_get_ci_status_uses_cache(mock_get):
     assert first == "success"
     assert second == "success"
     mock_get.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "uptime_text,expected",
+    [
+        ("532800.00 100.0", "6d 4h"),  # 6 days 4 hours
+        ("3661.0 10.0", "1h 1m"),
+        ("90.0 1.0", "1m"),
+        ("5.0 0.0", "0m"),
+    ],
+)
+def test_read_uptime(monkeypatch, uptime_text, expected):
+    """Uptime is formatted to at most two compact units, days suppressing minutes."""
+    monkeypatch.setattr(services_module.Path, "read_text", lambda self: uptime_text)
+    assert services_module._read_uptime() == expected
+
+
+def test_read_uptime_missing_file(monkeypatch):
+    """Missing /proc/uptime yields None rather than raising."""
+
+    def boom(self):
+        raise OSError("no such file")
+
+    monkeypatch.setattr(services_module.Path, "read_text", boom)
+    assert services_module._read_uptime() is None
+
+
+def test_read_memory(monkeypatch):
+    """Memory is derived from MemTotal minus MemAvailable in /proc/meminfo."""
+    meminfo = "MemTotal:        3979956 kB\nMemAvailable:    2049792 kB\nBuffers:           1 kB\n"
+    monkeypatch.setattr(services_module.Path, "read_text", lambda self: meminfo)
+    used_mb, total_mb, used_pct = services_module._read_memory()
+    assert (used_mb, total_mb, used_pct) == (1885, 3887, 48.5)
+
+
+def test_read_cpu_temperature(monkeypatch):
+    """Thermal zone millidegrees are converted to Celsius."""
+    monkeypatch.setattr(services_module.Path, "read_text", lambda self: "52600\n")
+    assert services_module._read_cpu_temperature() == 52.6
+
+
+def test_get_system_info_returns_dataclass():
+    """get_system_info always returns a SystemInfo; cross-platform fields stay populated."""
+    info = get_system_info()
+    assert isinstance(info, SystemInfo)
+    assert isinstance(info.hostname, str)
+    assert info.cpu_count is None or info.cpu_count >= 1

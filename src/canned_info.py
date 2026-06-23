@@ -1,4 +1,20 @@
-from src.services import ServiceStatus
+from src.services import ServiceStatus, SystemInfo
+
+# Stand-in host vitals for dev mode (off-Pi, where /proc and /sys aren't the Pi's).
+canned_system_info = SystemInfo(
+    hostname="raspberrypi",
+    uptime="6d 14h",
+    temperature_c=52.6,
+    cpu_percent=12.4,
+    load_avg=0.42,
+    cpu_count=4,
+    memory_used_mb=1840,
+    memory_total_mb=3886,
+    memory_used_pct=47.3,
+    disk_used_pct=38.0,
+    disk_used_gb=44.7,
+    disk_total_gb=117.6,
+)
 
 # Website links with icons (icon mapping centralized here, not in template)
 websites = [

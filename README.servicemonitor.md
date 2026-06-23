@@ -40,6 +40,7 @@ flowchart LR
 4. Live logs streamed via SSE at `/logs/stream` (journalctl -f)
 5. Restart commands sent via `sudo systemctl restart`
 6. Failed services trigger Telegram alerts (once per 6 AM–6 AM window)
+7. Dashboard home polls `/api/system-info` every 10s for host vitals (temp, CPU, memory, disk, uptime)
 
 ## Prerequisites
 
@@ -110,6 +111,7 @@ service-monitor/
 │   ├── services-list.js # Service list: search, auto-refresh, project colors
 │   ├── log-stream.js   # SSE log streaming, filtering, spike chart
 │   ├── sidebar-details.js # Async sidebar status/CI enrichment
+│   ├── system-info.js  # Dashboard home: polls /api/system-info, renders vitals grid
 │   └── notifications.js # ARIA live region announcements
 ├── tests/
 │   ├── test_app.py
@@ -145,6 +147,7 @@ Copy `.env.example` to `.env` and fill in values:
 | `/restart` | POST | Restart a service (validated against known services) |
 | `/logs/stream` | GET (SSE) | Server-sent events stream of journalctl output for a service |
 | `/api/services/sidebar-details` | GET | JSON: enriched status + CI for all services (loaded async after first paint) |
+| `/api/system-info` | GET | JSON: host (Pi) vitals — temperature, CPU, memory, disk, uptime |
 | `/inspector-detector/check` | POST | Run Inspector Detector inspection check (service-specific) |
 
 ### POST `/restart`
@@ -184,6 +187,33 @@ Returns:
   ]
 }
 ```
+
+### GET `/api/system-info`
+
+Host vitals read live from `/proc` and `/sys` (stdlib only, no extra deps). Polled by the
+dashboard home view every 10s. Any field is `null` when its source is unavailable (e.g. running
+off-Pi); in dev mode the route returns `canned_system_info`.
+
+```json
+{
+  "hostname": "raspberrypi",
+  "uptime": "6d 14h",
+  "temperature_c": 52.6,
+  "cpu_percent": 12.4,
+  "load_avg": 0.42,
+  "cpu_count": 4,
+  "memory_used_mb": 1840,
+  "memory_total_mb": 3886,
+  "memory_used_pct": 47.3,
+  "disk_used_pct": 38.0,
+  "disk_used_gb": 44.7,
+  "disk_total_gb": 117.6
+}
+```
+
+Sources: `temperature_c` from `/sys/class/thermal/thermal_zone0/temp`; `cpu_percent` sampled over
+~100ms from `/proc/stat`; `memory_*` from `/proc/meminfo`; `uptime` from `/proc/uptime`;
+`load_avg`/`cpu_count` and `disk_*` via stdlib (`os`, `shutil`), so they populate cross-platform.
 
 ## Key Concepts
 
