@@ -1034,7 +1034,7 @@ textarea:focus-visible {
 
 @media (min-width: 1024px) {
     .log-filters {
-        grid-template-columns: minmax(7.5rem, 1fr) minmax(0, 2.5fr) auto;
+        grid-template-columns: repeat(3, minmax(6rem, auto)) minmax(0, 2fr) auto;
         align-items: center;
         column-gap: var(--spacing-sm);
     }
@@ -1043,6 +1043,56 @@ textarea:focus-visible {
         justify-self: end;
         margin-left: var(--spacing-md);
     }
+}
+
+/* Traceback highlighting */
+.log-tb-line {
+    display: block;
+    border-left: 2px solid rgba(255, 69, 58, 0.5);
+    padding-left: 0.5rem;
+    margin-left: -0.5rem;
+    background: rgba(255, 69, 58, 0.04);
+}
+
+.log-tb-start {
+    display: flex;
+    align-items: baseline;
+    gap: 0.25rem;
+}
+
+.log-tb-start .log-copy-btn {
+    margin-left: auto;
+}
+
+.log-tb-prefix { color: var(--color-text-muted); }
+.log-tb-heading { color: var(--color-text-secondary); }
+.log-tb-code { color: var(--color-text-muted); }
+.log-tb-exc-type { color: var(--color-status-failed); font-weight: 600; }
+.log-tb-exc { color: var(--color-status-failed); }
+
+.log-copy-btn {
+    flex: none;
+    padding: 0.05rem 0.4rem;
+    font-family: inherit;
+    font-size: var(--font-size-xs);
+    color: var(--color-text-secondary);
+    background: rgba(118, 118, 128, 0.18);
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    cursor: pointer;
+    opacity: 0.45;
+    transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.log-tb-start:hover .log-copy-btn,
+.log-copy-btn:focus-visible {
+    opacity: 1;
+}
+
+.log-copy-btn:hover {
+    opacity: 1;
+    color: var(--color-text-primary);
+    border-color: var(--color-accent);
 }
 
 .log-chart-panel {

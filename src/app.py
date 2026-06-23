@@ -174,9 +174,7 @@ def system_info():
     except Exception:
         logger.exception("Failed to collect system info")
         return jsonify({"error": "failed to collect system info"}), 500
-    payload = asdict(info)
-    logger.info("system-info: %s", payload)
-    return jsonify(payload)
+    return jsonify(asdict(info))
 
 
 @app.route("/")

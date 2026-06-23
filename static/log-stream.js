@@ -12,16 +12,132 @@
     const logEntries = [];
     let reverseDirection = false;
 
+    // Traceback grouping state, threaded across streamed lines.
+    let activeTracebackId = null;
+    let tracebackCounter = 0;
+
+    const TRACEBACK_START_RE = /^Traceback \(most recent call last\):/;
+    const TRACEBACK_CONNECTOR_RE = /^(During handling of the above exception|The above exception was the direct cause)/;
+    const EXCEPTION_LINE_RE = /^[A-Za-z_][\w.]*(?:Error|Exception|Warning|Interrupt|Exit|Timeout|Failure|Abort|Fault)\b|^[A-Za-z_][\w.]*:\s/;
+
     /**
-     * Classify a log line and return a CSS class for coloring.
+     * Strip the journalctl prefix (timestamp, host, unit[pid]:) from a line,
+     * returning just the message payload. Falls back to the whole line.
      * @param {string} line
      * @returns {string}
      */
-    function logLineClass(line) {
+    function logMessage(line) {
+        const pidIdx = line.indexOf(']: ');
+        if (pidIdx !== -1) return line.slice(pidIdx + 3);
+        const match = line.match(/^\d{4}-\d{2}-\d{2}T\S+\s+\S+\s+\S+?:\s(.*)$/);
+        return match ? match[1] : line;
+    }
+
+    /**
+     * Classify a log line's severity for filtering and coloring.
+     * @param {string} line
+     * @returns {'error'|'warning'|'info'}
+     */
+    function logSeverity(line) {
         const lower = line.toLowerCase();
-        if (lower.includes('error') || lower.includes('failed') || lower.includes('fatal')) return 'error';
+        if (lower.includes('error') || lower.includes('failed') || lower.includes('fatal') ||
+            lower.includes('exception') || lower.includes('traceback')) return 'error';
         if (lower.includes('warn')) return 'warning';
-        return '';
+        return 'info';
+    }
+
+    /**
+     * Determine a line's role within a Python traceback, advancing the grouping
+     * state machine. Returns the group id so all lines of one traceback share it.
+     * @param {string} message
+     * @returns {{role: 'start'|'mid'|'end'|null, id: number|null}}
+     */
+    function tracebackRoleFor(message) {
+        if (TRACEBACK_START_RE.test(message)) {
+            activeTracebackId = ++tracebackCounter;
+            return { role: 'start', id: activeTracebackId };
+        }
+        if (activeTracebackId === null) return { role: null, id: null };
+
+        const id = activeTracebackId;
+        if (/^\s/.test(message) || TRACEBACK_CONNECTOR_RE.test(message)) {
+            return { role: 'mid', id };
+        }
+        if (EXCEPTION_LINE_RE.test(message)) {
+            activeTracebackId = null;
+            return { role: 'end', id };
+        }
+        // A flush-left, non-exception line means the traceback has ended.
+        activeTracebackId = null;
+        return { role: null, id: null };
+    }
+
+    /**
+     * Build a child span with a class and text.
+     * @param {string} cls
+     * @param {string} text
+     * @returns {HTMLSpanElement}
+     */
+    function makeSpan(cls, text) {
+        const el = document.createElement('span');
+        if (cls) el.className = cls;
+        el.textContent = text;
+        return el;
+    }
+
+    /**
+     * Render a syntax-highlighted traceback line into the given span.
+     * @param {HTMLSpanElement} span
+     * @param {string} line
+     * @param {string} message
+     * @param {'start'|'mid'|'end'} role
+     * @param {number} id
+     */
+    function renderTracebackLine(span, line, message, role, id) {
+        span.classList.add('log-tb-line', `log-tb-${role}`);
+        const prefix = line.slice(0, line.length - message.length);
+        if (prefix) span.appendChild(makeSpan('log-tb-prefix', prefix));
+
+        if (role === 'start') {
+            span.appendChild(makeSpan('log-tb-heading', message));
+            span.appendChild(makeCopyButton(id));
+            return;
+        }
+
+        if (role === 'end') {
+            const colon = message.indexOf(':');
+            const type = colon === -1 ? message : message.slice(0, colon);
+            span.appendChild(makeSpan('log-tb-exc-type', type));
+            if (colon !== -1) span.appendChild(makeSpan('log-tb-exc', message.slice(colon)));
+            return;
+        }
+
+        // mid: File "..." frames and source lines, rendered as muted code.
+        span.appendChild(makeSpan('log-tb-code', message));
+    }
+
+    /**
+     * Build a "copy" button that copies the full traceback (messages only).
+     * @param {number} id
+     * @returns {HTMLButtonElement}
+     */
+    function makeCopyButton(id) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'log-copy-btn';
+        btn.textContent = 'copy';
+        btn.addEventListener('click', (evt) => {
+            evt.stopPropagation();
+            const text = logEntries
+                .filter((entry) => entry.tracebackId === id)
+                .map((entry) => entry.message)
+                .join('\n');
+            navigator.clipboard?.writeText(text).then(() => {
+                btn.textContent = 'copied';
+                setTimeout(() => { btn.textContent = 'copy'; }, 1200);
+            });
+        });
+        return btn;
     }
 
     /**
@@ -81,21 +197,32 @@
         const caseSensitive = document.getElementById('logCaseSensitive')?.checked || false;
         const normalizedNeedle = caseSensitive ? textFilter : textFilter.toLowerCase();
 
-        let visibleCount = 0;
-        const visibleEntries = [];
+        const severity = document.getElementById('logSeverityFilter')?.value || 'all';
+        const countRaw = document.getElementById('logCountFilter')?.value || 'all';
+        const maxCount = countRaw === 'all' ? Infinity : parseInt(countRaw, 10) || Infinity;
+
+        // First pass: time + text + severity. Count cap is applied afterwards so
+        // it keeps the newest N matches rather than the first N scanned.
+        const matched = [];
         for (const entry of logEntries) {
             const visibleByTime = passesTimestampFilter(entry, startTs, endTs);
             const haystack = caseSensitive ? entry.line : entry.line.toLowerCase();
             const visibleByText = normalizedNeedle === '' || haystack.includes(normalizedNeedle);
+            const visibleBySeverity = severity === 'all' || entry.severity === severity;
 
-            const isVisible = visibleByTime && visibleByText;
-            entry.element.style.display = isVisible ? '' : 'none';
-            if (isVisible) {
-                visibleCount += 1;
-                visibleEntries.push(entry);
+            if (visibleByTime && visibleByText && visibleBySeverity) {
+                matched.push(entry);
+            } else {
+                entry.element.style.display = 'none';
             }
         }
 
+        const startIdx = Number.isFinite(maxCount) ? Math.max(0, matched.length - maxCount) : 0;
+        matched.forEach((entry, i) => {
+            entry.element.style.display = i >= startIdx ? '' : 'none';
+        });
+
+        const visibleEntries = matched.slice(startIdx);
         renderLogSpikeChart(visibleEntries, startTs, endTs);
     }
 
@@ -104,7 +231,7 @@
      * Uses only 'change' to avoid double-firing on checkboxes/selects.
      */
     function setupLogFilters() {
-        const ids = ['logTimeFilterMode', 'logTextFilter', 'logCaseSensitive', 'logReverseDirection'];
+        const ids = ['logTimeFilterMode', 'logCountFilter', 'logSeverityFilter', 'logTextFilter', 'logCaseSensitive', 'logReverseDirection'];
 
         for (const id of ids) {
             const control = document.getElementById(id);
@@ -252,10 +379,19 @@
     function appendLogLine(el, line) {
         const pinnedToEdge = isPinnedToActiveEdge(el);
 
+        const message = logMessage(line);
+        const { role, id } = tracebackRoleFor(message);
+
+        const severity = role ? 'error' : logSeverity(line);
+
         const span = document.createElement('span');
-        const cls = logLineClass(line);
-        if (cls) span.className = cls;
-        span.textContent = line + '\n';
+        if (role) {
+            renderTracebackLine(span, line, message, role, id);
+        } else {
+            if (severity === 'error' || severity === 'warning') span.className = severity;
+            span.textContent = line + '\n';
+        }
+
         if (reverseDirection) {
             el.prepend(span);
         } else {
@@ -264,7 +400,10 @@
 
         logEntries.push({
             line,
+            message,
             timestamp: parseLogTimestamp(line),
+            severity,
+            tracebackId: id,
             element: span,
         });
 

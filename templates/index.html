@@ -219,7 +219,24 @@
                                 <option value="last30m" selected>Last 30 min</option>
                                 <option value="last60m">Last 60 min</option>
                                 <option value="last1d">Last day</option>
-                                <option value="all">All</option>
+                                <option value="all">All time</option>
+                            </select>
+                        </label>
+                        <label class="log-filter-field">
+                            <select id="logCountFilter" aria-label="Max log lines">
+                                <option value="all" selected>All lines</option>
+                                <option value="100">Last 100</option>
+                                <option value="500">Last 500</option>
+                                <option value="1000">Last 1000</option>
+                                <option value="5000">Last 5000</option>
+                            </select>
+                        </label>
+                        <label class="log-filter-field">
+                            <select id="logSeverityFilter" aria-label="Log severity">
+                                <option value="all" selected>All levels</option>
+                                <option value="error">Errors</option>
+                                <option value="warning">Warnings</option>
+                                <option value="info">Info</option>
                             </select>
                         </label>
                         <label class="log-filter-field log-filter-field--wide">

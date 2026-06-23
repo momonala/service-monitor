@@ -125,29 +125,21 @@
 
     async function refresh(container) {
         try {
-            console.log('[system-info] fetching /api/system-info');
             const res = await fetch('/api/system-info');
-            console.log('[system-info] response status', res.status, res.statusText);
             if (!res.ok) {
                 showError(container, `Failed to load system info (HTTP ${res.status}).`);
                 throw new Error(`system-info ${res.status}`);
             }
-            const data = await res.json();
-            console.log('[system-info] data', data);
-            render(container, data);
+            render(container, await res.json());
         } catch (err) {
-            console.error('[system-info] refresh failed:', err);
-            showError(container, `Could not load system info — ${err.message}. See console.`);
+            console.error('System info refresh failed:', err);
+            showError(container, `Could not load system info — ${err.message}.`);
         }
     }
 
     function init() {
         const container = document.getElementById('systemMetrics');
-        if (!container) {
-            console.log('[system-info] no #systemMetrics on page; skipping (not the home view)');
-            return;
-        }
-        console.log('[system-info] init, polling every', REFRESH_INTERVAL, 'ms');
+        if (!container) return;  // not on the dashboard home view
         refresh(container);
         timer = setInterval(() => refresh(container), REFRESH_INTERVAL);
     }

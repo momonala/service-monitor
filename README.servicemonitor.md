@@ -109,7 +109,7 @@ service-monitor/
 │   ├── main.js         # Module bootstrap
 │   ├── ui-shell.js     # Sidebar open/close, hamburger, keyboard nav
 │   ├── services-list.js # Service list: search, auto-refresh, project colors
-│   ├── log-stream.js   # SSE log streaming, filtering, spike chart
+│   ├── log-stream.js   # SSE log streaming, filtering (time/count/severity/text), spike chart, traceback grouping + highlight
 │   ├── sidebar-details.js # Async sidebar status/CI enrichment
 │   ├── system-info.js  # Dashboard home: polls /api/system-info, renders vitals grid
 │   └── notifications.js # ARIA live region announcements
