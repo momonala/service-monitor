@@ -20,17 +20,24 @@ flowchart LR
         end
         subgraph App
             Flask[Flask :5001]
+            Sched[Health-check scheduler]
         end
     end
     subgraph External
         CF[Cloudflared Tunnel]
         Browser[Browser]
+        Other[Other services]
+        TG[Telegram Bot API]
     end
 
     SVC1 -->|systemctl status/list-units| Flask
     Flask -->|systemctl restart| SVC1
     Flask <-->|HTTP| CF
     CF <-->|HTTPS| Browser
+    Sched -->|every 5 min| SVC1
+    Sched -->|send_service_failure_alert| TG
+    Other -->|POST /api/alert| Flask
+    Flask -->|send_telegram_message| TG
 ```
 
 **Data Flow:**
@@ -39,8 +46,9 @@ flowchart LR
 3. Renders dashboard; sidebar details loaded async via `/api/services/sidebar-details`
 4. Live logs streamed via SSE at `/logs/stream` (journalctl -f)
 5. Restart commands sent via `sudo systemctl restart`
-6. Failed services trigger Telegram alerts (once per 6 AM–6 AM window)
-7. Dashboard home polls `/api/system-info` every 10s for host vitals (temp, CPU, memory, disk, uptime)
+6. Background scheduler checks health every 5 minutes; failed services send Telegram alerts via `send_service_failure_alert` (rate-limited per service: `hourly` / `daily` / `muted`)
+7. Other apps can POST custom Markdown alerts to `/api/alert` (always sends; no auth)
+8. Dashboard home polls `/api/system-info` every 10s for host vitals (temp, CPU, memory, disk, uptime)
 
 ## Prerequisites
 
@@ -97,8 +105,8 @@ service-monitor/
 ├── src/
 │   ├── app.py          # Flask app — all routes and request handling
 │   ├── services.py     # systemd querying, ServiceStatus parsing, CI status
-│   ├── scheduler.py    # Background health check thread + Telegram alerting
-│   ├── telegram.py     # Telegram error notifications
+│   ├── scheduler.py    # Background health check + per-service alert frequency
+│   ├── telegram.py     # Shared Telegram transport; service-failure message formatting
 │   ├── canned_info.py  # Static website links + canned ServiceStatus fixtures for dev/testing
 │   ├── values.py       # Loads secrets from .env (python-dotenv)
 │   └── config.py       # CLI tool that reads pyproject.toml config values
@@ -110,16 +118,19 @@ service-monitor/
 │   ├── ui-shell.js     # Sidebar open/close, hamburger, keyboard nav
 │   ├── services-list.js # Service list: search, auto-refresh, project colors
 │   ├── log-stream.js   # SSE log streaming, filtering (time/count/severity/text), spike chart, traceback grouping + highlight
-│   ├── sidebar-details.js # Async sidebar status/CI enrichment
+│   ├── sidebar-details.js # Async sidebar status/CI enrichment + alert frequency UI
 │   ├── system-info.js  # Dashboard home: polls /api/system-info, renders vitals grid
 │   └── notifications.js # ARIA live region announcements
 ├── tests/
 │   ├── test_app.py
+│   ├── test_scheduler.py
+│   ├── test_telegram.py
 │   ├── test_services.py
 │   └── test_config.py
 ├── install/
 │   ├── install.sh
 │   └── projects_service-monitor.service
+├── alert_settings.json # Persisted per-service alert frequencies (created at runtime)
 ├── .env.example        # Template for required environment variables
 ├── pyproject.toml
 └── cloudflared/
@@ -132,7 +143,7 @@ Copy `.env.example` to `.env` and fill in values:
 
 | Variable | Required | Description |
 |---|---|---|
-| `TELEGRAM_API_TOKEN` | Yes | Telegram bot token for failure alerts |
+| `TELEGRAM_API_TOKEN` | Yes | Telegram bot token for failure + custom alerts |
 | `TELEGRAM_CHAT_ID` | Yes | Telegram chat ID to send alerts to |
 | `GITHUB_TOKEN` | No | GitHub PAT for CI status; unauthenticated rate limit applies if omitted |
 | `INSPECTOR_DETECTOR_UV_PATH` | No | Path to `uv` binary on Pi (default: `/home/mnalavadi/.local/bin/uv`) |
@@ -148,6 +159,9 @@ Copy `.env.example` to `.env` and fill in values:
 | `/logs/stream` | GET (SSE) | Server-sent events stream of journalctl output for a service |
 | `/api/services/sidebar-details` | GET | JSON: enriched status + CI for all services (loaded async after first paint) |
 | `/api/system-info` | GET | JSON: host (Pi) vitals — temperature, CPU, memory, disk, uptime |
+| `/api/alert` | POST | Send a custom Telegram alert (Markdown message, no auth/rate limit) |
+| `/api/alert-settings` | GET | Per-service alert frequencies (`hourly` / `daily` / `muted`) |
+| `/api/alert-settings` | POST | Update one service’s alert frequency |
 | `/inspector-detector/check` | POST | Run Inspector Detector inspection check (service-specific) |
 
 ### POST `/restart`
@@ -215,6 +229,49 @@ Sources: `temperature_c` from `/sys/class/thermal/thermal_zone0/temp`; `cpu_perc
 ~100ms from `/proc/stat`; `memory_*` from `/proc/meminfo`; `uptime` from `/proc/uptime`;
 `load_avg`/`cpu_count` and `disk_*` via stdlib (`os`, `shutil`), so they populate cross-platform.
 
+### POST `/api/alert`
+
+Send a custom Telegram alert from another service. No auth; always sends (caller controls spam).
+Uses the same Telegram transport as failure alerts (`send_telegram_message` in `src/telegram.py`) with
+`parse_mode=Markdown` (caller supplies valid Markdown).
+
+**Request:**
+```json
+{
+  "message": "*Backup failed* on `projects_foo.service`"
+}
+```
+
+**Response:**
+```json
+{"ok": true}
+```
+`400` if `message` is missing/empty (`{"ok": false, "error": "..."}`); `502` if Telegram delivery fails.
+
+### GET/POST `/api/alert-settings`
+
+Per-service alert frequency for the background health-check scheduler. Default for unknown services is
+`hourly`. Frequencies: `muted` (never), `hourly` (at most once per hour), `daily` (once per reset window
+starting at `ALERT_RESET_HOUR`, default 6 AM).
+
+**GET response:**
+```json
+{
+  "projects_foo.service": "hourly",
+  "projects_bar.service": "muted"
+}
+```
+
+**POST request:**
+```json
+{
+  "service": "projects_foo.service",
+  "frequency": "daily"
+}
+```
+
+**POST response:** `{"ok": true}` on success; `400` for missing service or invalid frequency.
+
 ## Key Concepts
 
 | Concept | Description |
@@ -224,7 +281,8 @@ Sources: `temperature_c` from `/sys/class/thermal/thermal_zone0/temp`; `cpu_perc
 | Status indicators | Green = active (running), Red = failed, Gray = inactive |
 | Project groups | Services sharing the same base name (e.g. `projects_energy-monitor_*`) are visually grouped in the sidebar |
 | CI status | Fetched from GitHub Actions API for services without a suffix; cached 60s per repo |
-
+| Telegram alerts | One transport (`send_telegram_message`); service failures use `send_service_failure_alert`; custom messages use `POST /api/alert` |
+| Alert frequency | Per-service `muted` / `hourly` / `daily`; persisted in `alert_settings.json`; last-sent times kept in memory |
 ## Data Models
 
 ```
@@ -244,10 +302,12 @@ ServiceStatus
 
 ## Storage / Persistence
 
-- No database. All state is read live from systemd.
+- No database. Service state is read live from systemd.
 - Service list cached in-process for 5 seconds.
 - CI status cached in-process for 60 seconds per repo.
-- Alert deduplication tracked in-memory; resets each day at 6 AM.
+- Alert frequencies persisted in `alert_settings.json` (written on change).
+- Last-alert timestamps kept in-memory only (lost on restart); daily window resets at `ALERT_RESET_HOUR`.
+- Custom `POST /api/alert` messages are not rate-limited or persisted.
 
 ## Configuration
 
@@ -256,7 +316,9 @@ ServiceStatus
 | `host` | `src/app.py` | `0.0.0.0` | Bind address |
 | `port` | `src/app.py` | `5001` | HTTP port |
 | `service_pattern` | `src/services.py` | `projects_*` | systemctl filter pattern |
-| `ALERT_RESET_HOUR` | `src/scheduler.py` | `6` | Hour (local time) at which daily alert deduplication resets |
+| `DEFAULT_ALERT_FREQUENCY` | `src/scheduler.py` | `hourly` | Default frequency when a service has no saved setting |
+| `ALERT_RESET_HOUR` | `src/scheduler.py` | `6` | Hour (local time) at which the daily alert window resets |
+| Health-check interval | `src/scheduler.py` | 5 minutes | How often failed services are scanned for Telegram alerts |
 
 ## Deployment
 
@@ -285,13 +347,14 @@ WantedBy=multi-user.target
 |---|---|---|
 | systemd | Service management | Local system |
 | Cloudflared | HTTPS tunnel | Cloudflare account |
-| Telegram Bot API | Failure alerts | Bot token in `.env` |
+| Telegram Bot API | Failure + custom alerts | Bot token in `.env` |
 | GitHub Actions API | CI status badges | PAT in `.env` (optional) |
 
 ## Known Limitations
 
 - Inspector Detector check endpoint is hardcoded to a specific service name and configured via `INSPECTOR_DETECTOR_*` env vars
-- No authentication on web interface
+- No authentication on web interface or `POST /api/alert`
 - Requires sudo for restart functionality (must configure sudoers)
 - Only monitors services matching `projects_*` pattern
 - Log streaming only works on Linux (journalctl); dev mode shows placeholder
+- Last-alert dedupe state is in-memory; process restart can re-send a failure alert sooner than the configured window

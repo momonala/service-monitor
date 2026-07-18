@@ -6,9 +6,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import schedule
+from requests import RequestException
 
 from src.services import get_service_status, get_services
-from src.telegram import report_error_to_telegram
+from src.telegram import send_service_failure_alert
 
 logger = logging.getLogger(__name__)
 
@@ -100,14 +101,19 @@ def service_health_check():
     services = get_services()
     service_statuses = [get_service_status(svc) for svc in services]
     for service_status in service_statuses:
-        if service_status.is_failed:
-            logger.warning("Service %s has failed.", service_status.name)
-            if _should_alert(service_status.name):
-                report_error_to_telegram(service_status)
-                _mark_alerted(service_status.name)
-                logger.info("Alert sent for %s", service_status.name)
-            else:
-                logger.info("Alert suppressed for %s (muted or already sent)", service_status.name)
+        if not service_status.is_failed:
+            continue
+        logger.warning("Service %s has failed.", service_status.name)
+        if not _should_alert(service_status.name):
+            logger.info("Alert suppressed for %s (muted or already sent)", service_status.name)
+            continue
+        try:
+            send_service_failure_alert(service_status)
+        except RequestException:
+            logger.exception("Failed to send alert for %s", service_status.name)
+            continue
+        _mark_alerted(service_status.name)
+        logger.info("Alert sent for %s", service_status.name)
 
 
 def schedule_loop():

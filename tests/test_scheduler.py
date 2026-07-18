@@ -4,9 +4,11 @@ from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import pytest
+from requests import RequestException
 
 import src.scheduler as sched
-from src.scheduler import _should_alert, set_alert_frequency
+from src.scheduler import _should_alert, service_health_check, set_alert_frequency
+from src.services import ServiceStatus
 
 
 @pytest.fixture(autouse=True)
@@ -17,6 +19,22 @@ def reset_scheduler_state():
     yield
     sched._alert_settings.clear()
     sched._alerted_services.clear()
+
+
+def _failed_service(name: str = "projects_foo.service") -> ServiceStatus:
+    return ServiceStatus(
+        name=name,
+        is_active=False,
+        is_failed=True,
+        uptime=None,
+        memory=None,
+        cpu=None,
+        last_error=None,
+        full_status="",
+        project_group="foo",
+        suffix=None,
+        ci_status=None,
+    )
 
 
 def test_muted_service_never_alerts():
@@ -58,52 +76,34 @@ def test_set_invalid_frequency_raises():
         set_alert_frequency("projects_foo.service", "never")
 
 
-@patch("src.scheduler.report_error_to_telegram")
+@patch("src.scheduler.send_service_failure_alert")
 @patch("src.scheduler.get_service_status")
 @patch("src.scheduler.get_services")
-def test_health_check_skips_muted_service(mock_get_services, mock_get_status, mock_telegram):
-    from src.scheduler import service_health_check
-    from src.services import ServiceStatus
-
+def test_health_check_skips_muted_service(mock_get_services, mock_get_status, mock_alert):
     mock_get_services.return_value = ["projects_foo.service"]
-    mock_get_status.return_value = ServiceStatus(
-        name="projects_foo.service",
-        is_active=False,
-        is_failed=True,
-        uptime=None,
-        memory=None,
-        cpu=None,
-        last_error=None,
-        full_status="",
-        project_group="foo",
-        suffix=None,
-        ci_status=None,
-    )
+    mock_get_status.return_value = _failed_service()
     set_alert_frequency("projects_foo.service", "muted")
     service_health_check()
-    mock_telegram.assert_not_called()
+    mock_alert.assert_not_called()
 
 
-@patch("src.scheduler.report_error_to_telegram")
+@patch("src.scheduler.send_service_failure_alert")
 @patch("src.scheduler.get_service_status")
 @patch("src.scheduler.get_services")
-def test_health_check_sends_alert_for_failed_service(mock_get_services, mock_get_status, mock_telegram):
-    from src.scheduler import service_health_check
-    from src.services import ServiceStatus
-
+def test_health_check_sends_alert_for_failed_service(mock_get_services, mock_get_status, mock_alert):
     mock_get_services.return_value = ["projects_foo.service"]
-    mock_get_status.return_value = ServiceStatus(
-        name="projects_foo.service",
-        is_active=False,
-        is_failed=True,
-        uptime=None,
-        memory=None,
-        cpu=None,
-        last_error=None,
-        full_status="",
-        project_group="foo",
-        suffix=None,
-        ci_status=None,
-    )
+    mock_get_status.return_value = _failed_service()
     service_health_check()
-    mock_telegram.assert_called_once()
+    mock_alert.assert_called_once()
+    assert "projects_foo.service" in sched._alerted_services
+
+
+@patch("src.scheduler.send_service_failure_alert", side_effect=RequestException("down"))
+@patch("src.scheduler.get_service_status")
+@patch("src.scheduler.get_services")
+def test_health_check_does_not_mark_alerted_when_send_fails(mock_get_services, mock_get_status, mock_alert):
+    mock_get_services.return_value = ["projects_foo.service"]
+    mock_get_status.return_value = _failed_service()
+    service_health_check()
+    mock_alert.assert_called_once()
+    assert "projects_foo.service" not in sched._alerted_services

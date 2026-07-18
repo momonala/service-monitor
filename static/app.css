@@ -188,7 +188,8 @@ textarea:focus-visible {
     .sidebar--collapsed .service-name,
     .sidebar--collapsed .service-uptime,
     .sidebar--collapsed .service-details__item--ci,
-    .sidebar--collapsed .service-alert-badge {
+    .sidebar--collapsed .service-alert-badge,
+    .sidebar--collapsed .project-group__metrics {
         display: none !important;
     }
     
@@ -232,6 +233,32 @@ textarea:focus-visible {
     border-left: 3px solid var(--project-color, rgba(255, 255, 255, 0.15));
     margin-bottom: 0.25rem;
 }
+
+.project-group__metrics {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: 0.2rem var(--spacing-md) 0.35rem;
+}
+
+.project-metric {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    font-size: var(--font-size-xs);
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.project-metric__icon {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+}
+
+.project-metric--cpu { color: var(--color-info); }
+.project-metric--memory { color: #9a6acc; }
 
 .project-group + .project-group::before {
     content: '';
@@ -824,6 +851,61 @@ textarea:focus-visible {
     padding: var(--spacing-panel);
     border: 1px solid var(--border-color);
     animation: fadeIn 0.3s ease-out;
+}
+
+.service-info-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 20%) minmax(0, 1fr);
+    gap: var(--spacing-md);
+    align-items: start;
+}
+
+.project-summary-badges {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    min-width: 0;
+}
+
+.project-badge {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    padding: var(--spacing-sm);
+    border-radius: var(--radius);
+    border: 1px solid var(--border-color);
+    background: rgba(255, 255, 255, 0.03);
+    text-align: center;
+    min-height: 3.5rem;
+}
+
+.project-badge__icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+.project-badge__value {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    line-height: 1.2;
+    word-break: break-word;
+}
+
+.project-badge--cpu {
+    color: var(--color-info);
+}
+
+.project-badge--memory {
+    color: #9a6acc;
+}
+
+@media (max-width: 639px) {
+    .service-info-layout {
+        grid-template-columns: minmax(0, 28%) minmax(0, 1fr);
+    }
 }
 
 .service-info {

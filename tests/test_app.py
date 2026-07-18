@@ -4,6 +4,7 @@ import subprocess
 from unittest.mock import patch
 
 import pytest
+from requests import RequestException
 
 from src.app import app
 from src.services import ServiceStatus
@@ -129,6 +130,8 @@ def test_sidebar_details(mock_get_status, mock_get_services, mock_is_linux, clie
     payload = response.get_json()
     assert payload["services"][0]["name"] == "projects_test1.service"
     assert payload["services"][0]["ci_status"] == "success"
+    assert payload["projects"]["test1"]["memory"] == "100.0M"
+    assert payload["projects"]["test1"]["cpu"] == "10s"
 
 
 @patch("src.app.is_linux", return_value=True)
@@ -184,3 +187,37 @@ def test_alert_settings_post_invalid(client):
 
     response = client.post("/api/alert-settings", data="not json", content_type="text/plain")
     assert response.status_code == 400
+
+
+@patch("src.app.send_telegram_message")
+def test_send_alert_success(mock_send, client):
+    """POST /api/alert sends the custom Markdown message to Telegram."""
+    response = client.post("/api/alert", json={"message": "*Alert:* `disk full`"})
+    assert response.status_code == 200
+    assert response.get_json() == {"ok": True}
+    mock_send.assert_called_once_with("*Alert:* `disk full`")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"message": ""},
+        {"message": "   "},
+        {"message": 123},
+    ],
+)
+def test_send_alert_rejects_invalid_message(payload, client):
+    """POST /api/alert requires a non-empty string message."""
+    response = client.post("/api/alert", json=payload)
+    assert response.status_code == 400
+    assert response.get_json()["ok"] is False
+
+
+@patch("src.app.send_telegram_message", side_effect=RequestException("telegram down"))
+def test_send_alert_telegram_failure(mock_send, client):
+    """POST /api/alert returns 502 when Telegram delivery fails."""
+    response = client.post("/api/alert", json={"message": "something broke"})
+    assert response.status_code == 502
+    assert response.get_json() == {"ok": False, "error": "failed to send alert"}
+    mock_send.assert_called_once()

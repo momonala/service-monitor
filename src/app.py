@@ -6,17 +6,27 @@ from dataclasses import asdict
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, redirect, render_template, request, stream_with_context, url_for
+from requests import RequestException
 
 from src.canned_info import canned_service_statuses, canned_system_info, websites
-from src.scheduler import VALID_FREQUENCIES, get_all_alert_settings, set_alert_frequency, start_scheduler
+from src.scheduler import (
+    DEFAULT_ALERT_FREQUENCY,
+    VALID_FREQUENCIES,
+    get_all_alert_settings,
+    set_alert_frequency,
+    start_scheduler,
+)
 from src.services import (
+    aggregate_project_resources,
     get_info_for_service,
     get_service_health,
     get_service_status,
     get_services,
     get_system_info,
     is_linux,
+    parse_service_name,
 )
+from src.telegram import send_telegram_message
 from src.values import INSPECTOR_DETECTOR_CWD, INSPECTOR_DETECTOR_UV_PATH
 
 logging.basicConfig(level=logging.INFO)
@@ -122,12 +132,29 @@ def stream_logs():
     )
 
 
+@app.route("/api/alert", methods=["POST"])
+def send_alert():
+    """Send a custom Telegram alert. Expects JSON {message} with Telegram Markdown."""
+    data = request.get_json(silent=True) or {}
+    message = data.get("message", "")
+    if not isinstance(message, str) or not message.strip():
+        return jsonify({"ok": False, "error": "message parameter required"}), 400
+
+    try:
+        send_telegram_message(message)
+    except RequestException:
+        logger.exception("Failed to send custom Telegram alert")
+        return jsonify({"ok": False, "error": "failed to send alert"}), 502
+
+    return jsonify({"ok": True})
+
+
 @app.route("/api/alert-settings")
 def get_alert_settings():
-    """Return alert frequency settings for all known services, defaulting unknown ones to 'hourly'."""
+    """Return alert frequency settings for all known services."""
     services = get_services(use_cache=True) if is_linux() else []
     settings = get_all_alert_settings()
-    return jsonify({svc: settings.get(svc, "hourly") for svc in services})
+    return jsonify({svc: settings.get(svc, DEFAULT_ALERT_FREQUENCY) for svc in services})
 
 
 @app.route("/api/alert-settings", methods=["POST"])
@@ -146,10 +173,20 @@ def update_alert_setting():
 def sidebar_details():
     """Return enriched service details for sidebar rendering after first paint."""
     if not is_linux():
-        return jsonify({"services": []})
+        project_resources = aggregate_project_resources(canned_service_statuses)
+        return jsonify(
+            {
+                "services": [],
+                "projects": {
+                    project_group: {"memory": resources.memory, "cpu": resources.cpu}
+                    for project_group, resources in project_resources.items()
+                },
+            }
+        )
 
     services = get_services()
     detailed_statuses = _collect_statuses(services, detailed=True)
+    project_resources = aggregate_project_resources(detailed_statuses)
     payload = [
         {
             "name": status.name,
@@ -163,7 +200,11 @@ def sidebar_details():
         }
         for status in detailed_statuses
     ]
-    return jsonify({"services": payload})
+    projects = {
+        project_group: {"memory": resources.memory, "cpu": resources.cpu}
+        for project_group, resources in project_resources.items()
+    }
+    return jsonify({"services": payload, "projects": projects})
 
 
 @app.route("/api/system-info")
@@ -189,11 +230,13 @@ def index():
     # lines=0: show only the systemctl status header (Active, Memory, CPU).
     # Log lines are streamed live via the /logs/stream SSE endpoint.
     selected_service_info = get_info_for_service(service, lines=0) if (service and is_linux()) else ""
+    current_project_group = parse_service_name(service)[0] if service else None
 
     return render_template(
         "index.html",
         services=service_statuses,
         current=service,
+        current_project_group=current_project_group,
         selected_service_info=selected_service_info,
         websites=websites,
     )

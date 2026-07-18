@@ -8,14 +8,19 @@ import src.services as services_module
 from src.canned_info import canned_service_statuses
 from src.services import (
     SystemInfo,
+    aggregate_project_resources,
+    format_cpu_seconds,
+    format_memory_bytes,
     get_ci_status,
     get_info_for_service,
     get_service_status,
     get_services,
     get_system_info,
     parse_cpu,
+    parse_cpu_seconds,
     parse_last_error,
     parse_memory,
+    parse_memory_bytes,
     parse_service_name,
     parse_timer_next,
     parse_uptime,
@@ -66,6 +71,119 @@ def test_parse_memory(status_text, expected):
 def test_parse_cpu(status_text, expected):
     """Parse CPU extracts CPU time or None."""
     assert parse_cpu(status_text) == expected
+
+
+@pytest.mark.parametrize(
+    "memory,expected_bytes",
+    [
+        ("123.4M", round(123.4 * 1024**2)),
+        ("1.2G", round(1.2 * 1024**3)),
+        ("512K", 512 * 1024),
+        (None, None),
+        ("", None),
+    ],
+)
+def test_parse_memory_bytes(memory, expected_bytes):
+    """Parse memory strings into bytes."""
+    assert parse_memory_bytes(memory) == expected_bytes
+
+
+@pytest.mark.parametrize(
+    "total_bytes,expected",
+    [
+        (512, "512B"),
+        (1536, "1.5K"),
+        (129499136, "123.5M"),
+    ],
+)
+def test_format_memory_bytes(total_bytes, expected):
+    """Format bytes as compact memory strings."""
+    assert format_memory_bytes(total_bytes) == expected
+
+
+@pytest.mark.parametrize(
+    "cpu,expected_seconds",
+    [
+        ("270ms", 0.27),
+        ("2.417s", 2.417),
+        ("7min 52.884s", 7 * 60 + 52.884),
+        ("1h 23min 45.678s", 3600 + 23 * 60 + 45.678),
+        (None, None),
+    ],
+)
+def test_parse_cpu_seconds(cpu, expected_seconds):
+    """Parse CPU time strings into seconds."""
+    result = parse_cpu_seconds(cpu)
+    if expected_seconds is None:
+        assert result is None
+    else:
+        assert result == pytest.approx(expected_seconds)
+
+
+@pytest.mark.parametrize(
+    "total_seconds,expected",
+    [
+        (0.27, "270ms"),
+        (45.0, "45s"),
+        (125.0, "2m 5s"),
+        (5025.0, "1h 23m"),
+    ],
+)
+def test_format_cpu_seconds(total_seconds, expected):
+    """Format CPU seconds as compact strings."""
+    assert format_cpu_seconds(total_seconds) == expected
+
+
+def test_aggregate_project_resources():
+    """Aggregate memory and CPU across services in the same project group."""
+    statuses = [
+        services_module.ServiceStatus(
+            name="projects_energy-monitor.service",
+            is_active=True,
+            is_failed=False,
+            uptime=None,
+            memory="100M",
+            cpu="5min",
+            last_error=None,
+            full_status="",
+            project_group="energy-monitor",
+            suffix=None,
+            ci_status=None,
+        ),
+        services_module.ServiceStatus(
+            name="projects_energy-monitor_mqtt.service",
+            is_active=True,
+            is_failed=False,
+            uptime=None,
+            memory="23.4M",
+            cpu="2min 30s",
+            last_error=None,
+            full_status="",
+            project_group="energy-monitor",
+            suffix="mqtt",
+            ci_status=None,
+        ),
+        services_module.ServiceStatus(
+            name="projects_pingpong.service",
+            is_active=True,
+            is_failed=False,
+            uptime=None,
+            memory="50M",
+            cpu="1h",
+            last_error=None,
+            full_status="",
+            project_group="pingpong",
+            suffix=None,
+            ci_status=None,
+        ),
+    ]
+    resources = aggregate_project_resources(statuses)
+    assert resources["energy-monitor"].memory == format_memory_bytes(
+        parse_memory_bytes("100M") + parse_memory_bytes("23.4M")
+    )
+    assert resources["energy-monitor"].cpu == format_cpu_seconds(5 * 60 + 2 * 60 + 30)
+    assert resources["pingpong"].memory == "50.0M"
+    assert resources["pingpong"].cpu == "1h"
 
 
 @pytest.mark.parametrize(

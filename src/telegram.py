@@ -1,24 +1,48 @@
-import logging
+"""Telegram alerting: one transport path for custom and service-failure messages."""
 
 import requests
 
 from src.services import ServiceStatus
 from src.values import telegram_api_token, telegram_chat_id
 
-logger = logging.getLogger(__name__)
+TELEGRAM_MAX_MESSAGE_LENGTH = 4096
+# Leave room in the failure template for fields around full_status.
+_MAX_FULL_STATUS_LENGTH = TELEGRAM_MAX_MESSAGE_LENGTH - 500
 
-MAX_STATUS_LENGTH = 4096 - 500  # Telegram limit is 4096, leave room for message template
+
+def send_telegram_message(text: str) -> None:
+    """Send a Markdown message to the configured Telegram chat.
+
+    Raises:
+        ValueError: if ``text`` is empty or whitespace-only.
+        requests.RequestException: if the Telegram API request fails.
+    """
+    if not text or not text.strip():
+        raise ValueError("message must be non-empty")
+
+    payload = {
+        "chat_id": telegram_chat_id,
+        "text": _fit_telegram_length(text),
+        "parse_mode": "Markdown",
+    }
+    response = requests.post(
+        f"https://api.telegram.org/bot{telegram_api_token}/sendMessage",
+        data=payload,
+    )
+    response.raise_for_status()
 
 
-def report_error_to_telegram(service_status: ServiceStatus) -> None:
-    """Send an error message to a Telegram chat."""
+def send_service_failure_alert(service_status: ServiceStatus) -> None:
+    """Format and send a failed-service alert. Raises on transport failure."""
+    send_telegram_message(_format_service_failure_alert(service_status))
 
-    # Truncate full_status if too long - keep the END since errors are usually there
-    full_status = service_status.full_status or "N/A"
-    if len(full_status) > MAX_STATUS_LENGTH:
-        full_status = "(truncated)...\n" + full_status[-MAX_STATUS_LENGTH:]
 
-    message = f"""*Service:* `{_escape_markdown(service_status.name)}`
+def _format_service_failure_alert(service_status: ServiceStatus) -> str:
+    full_status = _truncate_keeping_end(
+        service_status.full_status or "N/A",
+        _MAX_FULL_STATUS_LENGTH,
+    )
+    return f"""*Service:* `{_escape_markdown(service_status.name)}`
 *Last Error:* `{_escape_markdown(service_status.last_error or 'N/A')}`
 *Is Active:* `{service_status.is_active}`
 *Is Failed:* `{service_status.is_failed}`
@@ -31,22 +55,22 @@ def report_error_to_telegram(service_status: ServiceStatus) -> None:
 {full_status}
 ```"""
 
-    url = f"https://api.telegram.org/bot{telegram_api_token}/sendMessage"
-    payload = {
-        "chat_id": telegram_chat_id,
-        "text": message,
-        "parse_mode": "Markdown",
-    }
 
-    try:
-        response = requests.post(url, data=payload)
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        logger.error("Failed to send message to Telegram: %s", exc)
+def _fit_telegram_length(text: str) -> str:
+    if len(text) <= TELEGRAM_MAX_MESSAGE_LENGTH:
+        return text
+    return text[: TELEGRAM_MAX_MESSAGE_LENGTH - 20] + "\n...(truncated)"
+
+
+def _truncate_keeping_end(text: str, max_length: int) -> str:
+    """Keep the end of ``text`` (errors usually appear late in systemctl status)."""
+    if len(text) <= max_length:
+        return text
+    return "(truncated)...\n" + text[-max_length:]
 
 
 def _escape_markdown(text: str) -> str:
-    """Escape special characters for Telegram Markdown."""
+    """Escape special characters for Telegram legacy Markdown."""
     for char in ["*", "`", "["]:
         text = text.replace(char, "\\" + char)
     return text
