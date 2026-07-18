@@ -17,14 +17,12 @@ from src.scheduler import (
     start_scheduler,
 )
 from src.services import (
-    aggregate_project_resources,
     get_info_for_service,
     get_service_health,
     get_service_status,
     get_services,
     get_system_info,
     is_linux,
-    parse_service_name,
 )
 from src.telegram import send_telegram_message
 from src.values import INSPECTOR_DETECTOR_CWD, INSPECTOR_DETECTOR_UV_PATH
@@ -173,38 +171,22 @@ def update_alert_setting():
 def sidebar_details():
     """Return enriched service details for sidebar rendering after first paint."""
     if not is_linux():
-        project_resources = aggregate_project_resources(canned_service_statuses)
-        return jsonify(
-            {
-                "services": [],
-                "projects": {
-                    project_group: {"memory": resources.memory, "cpu": resources.cpu}
-                    for project_group, resources in project_resources.items()
-                },
-            }
-        )
+        return jsonify({"services": []})
 
     services = get_services()
     detailed_statuses = _collect_statuses(services, detailed=True)
-    project_resources = aggregate_project_resources(detailed_statuses)
     payload = [
         {
             "name": status.name,
             "is_active": status.is_active,
             "is_failed": status.is_failed,
             "uptime": status.uptime,
-            "memory": status.memory,
-            "cpu": status.cpu,
             "last_error": status.last_error,
             "ci_status": status.ci_status,
         }
         for status in detailed_statuses
     ]
-    projects = {
-        project_group: {"memory": resources.memory, "cpu": resources.cpu}
-        for project_group, resources in project_resources.items()
-    }
-    return jsonify({"services": payload, "projects": projects})
+    return jsonify({"services": payload})
 
 
 @app.route("/api/system-info")
@@ -230,13 +212,11 @@ def index():
     # lines=0: show only the systemctl status header (Active, Memory, CPU).
     # Log lines are streamed live via the /logs/stream SSE endpoint.
     selected_service_info = get_info_for_service(service, lines=0) if (service and is_linux()) else ""
-    current_project_group = parse_service_name(service)[0] if service else None
 
     return render_template(
         "index.html",
         services=service_statuses,
         current=service,
-        current_project_group=current_project_group,
         selected_service_info=selected_service_info,
         websites=websites,
     )

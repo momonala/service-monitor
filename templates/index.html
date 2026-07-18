@@ -131,7 +131,6 @@
                 {% if svc.project_group != ns.prev_group %}
                 {% if ns.prev_group is not none %}</div>{% endif %}
                 <div class="project-group" data-project-group="{{ svc.project_group }}">
-                    <div class="project-group__metrics" aria-label="{{ svc.project_group }} resource usage"></div>
                 {% set ns.prev_group = svc.project_group %}
                 {% endif %}
                 <div class="service-item {% if svc.name == current %}service-item--active{% endif %}"
@@ -209,21 +208,7 @@
                 {% if selected_service_info %}
                 <!-- Service Detail View -->
                 <div class="service-info-panel">
-                    <div class="service-info-layout">
-                        {% if current_project_group %}
-                        <div class="project-summary-badges" data-project-group="{{ current_project_group }}" aria-label="Project resource usage">
-                            <div class="project-badge project-badge--cpu" data-metric="cpu">
-                                <svg class="project-badge__icon" aria-hidden="true"><use href="#icon-cpu"></use></svg>
-                                <span class="project-badge__value" data-role="value">—</span>
-                            </div>
-                            <div class="project-badge project-badge--memory" data-metric="memory">
-                                <svg class="project-badge__icon" aria-hidden="true"><use href="#icon-memory"></use></svg>
-                                <span class="project-badge__value" data-role="value">—</span>
-                            </div>
-                        </div>
-                        {% endif %}
-                        <pre class="service-info service-info--status">{{ selected_service_info }}</pre>
-                    </div>
+                    <pre class="service-info service-info--status">{{ selected_service_info }}</pre>
                 </div>
                 <div class="log-stream-panel">
                     <div class="log-filters" aria-label="Log filters">

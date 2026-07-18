@@ -130,8 +130,7 @@ def test_sidebar_details(mock_get_status, mock_get_services, mock_is_linux, clie
     payload = response.get_json()
     assert payload["services"][0]["name"] == "projects_test1.service"
     assert payload["services"][0]["ci_status"] == "success"
-    assert payload["projects"]["test1"]["memory"] == "100.0M"
-    assert payload["projects"]["test1"]["cpu"] == "10s"
+    assert "projects" not in payload
 
 
 @patch("src.app.is_linux", return_value=True)

@@ -11,62 +11,6 @@
         return svg;
     }
 
-    function formatMetricValue(value) {
-        return value == null || value === '' ? '—' : value;
-    }
-
-    /**
-     * Create or update a compact project metric (sidebar).
-     * @param {Element} container
-     * @param {string} type - 'cpu' | 'memory'
-     * @param {string | null | undefined} value
-     */
-    function setProjectMetric(container, type, value) {
-        let metric = container.querySelector(`.project-metric--${type}`);
-        if (!metric) {
-            metric = document.createElement('span');
-            metric.className = `project-metric project-metric--${type}`;
-            const icon = buildIcon(type);
-            icon.classList.add('project-metric__icon');
-            const text = document.createElement('span');
-            text.className = 'project-metric__value';
-            text.dataset.role = 'value';
-            metric.appendChild(icon);
-            metric.appendChild(text);
-            container.appendChild(metric);
-        }
-        metric.querySelector('[data-role="value"]').textContent = formatMetricValue(value);
-    }
-
-    /**
-     * Update project-level CPU/memory totals in the sidebar.
-     * @param {Record<string, {cpu?: string|null, memory?: string|null}>} projects
-     */
-    function updateProjectSidebarMetrics(projects) {
-        document.querySelectorAll('.project-group[data-project-group]').forEach((group) => {
-            const projectGroup = group.dataset.projectGroup;
-            const metrics = group.querySelector('.project-group__metrics');
-            if (!metrics) return;
-            const data = projects[projectGroup] ?? {};
-            setProjectMetric(metrics, 'cpu', data.cpu);
-            setProjectMetric(metrics, 'memory', data.memory);
-        });
-    }
-
-    /**
-     * Update stacked project badges on the service detail view.
-     * @param {Record<string, {cpu?: string|null, memory?: string|null}>} projects
-     */
-    function updateProjectSummaryBadges(projects) {
-        const container = document.querySelector('.project-summary-badges[data-project-group]');
-        if (!container) return;
-        const data = projects[container.dataset.projectGroup] ?? {};
-        for (const type of ['cpu', 'memory']) {
-            const badge = container.querySelector(`.project-badge--${type} [data-role="value"]`);
-            if (badge) badge.textContent = formatMetricValue(data[type]);
-        }
-    }
-
     /**
      * Update sidebar card status indicator and detail rows.
      * @param {Element} serviceItem
@@ -230,10 +174,6 @@
         const payload = await detailsResponse.json();
         const alertSettings = alertsResponse.ok ? await alertsResponse.json() : {};
         const services = Array.isArray(payload.services) ? payload.services : [];
-        const projects = payload.projects && typeof payload.projects === 'object' ? payload.projects : {};
-
-        updateProjectSidebarMetrics(projects);
-        updateProjectSummaryBadges(projects);
 
         const byName = new Map();
         for (const item of nav.querySelectorAll('.service-item[data-service-name]')) {
