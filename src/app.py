@@ -24,6 +24,16 @@ from src.services import (
     get_system_info,
     is_linux,
 )
+from src.system_metrics import (
+    DEFAULT_ROLLUP,
+    DEFAULT_WINDOW,
+    ROLLUPS,
+    WINDOWS,
+    history_payload,
+    rollup_seconds,
+    temperature_window_stats,
+    window_seconds,
+)
 from src.telegram import send_telegram_message
 from src.values import INSPECTOR_DETECTOR_CWD, INSPECTOR_DETECTOR_UV_PATH
 
@@ -197,7 +207,36 @@ def system_info():
     except Exception:
         logger.exception("Failed to collect system info")
         return jsonify({"error": "failed to collect system info"}), 500
-    return jsonify(asdict(info))
+    payload = asdict(info)
+    try:
+        avg_24h, max_24h = temperature_window_stats(window="24h")
+        payload["temperature_avg_24h"] = avg_24h
+        payload["temperature_max_24h"] = max_24h
+    except Exception:
+        logger.exception("Failed to compute 24h temperature stats")
+        payload["temperature_avg_24h"] = None
+        payload["temperature_max_24h"] = None
+    return jsonify(payload)
+
+
+@app.route("/api/system-info/history")
+def system_info_history():
+    """Return windowed host vitals time series for the dashboard chart."""
+    window = request.args.get("window", DEFAULT_WINDOW)
+    rollup = request.args.get("rollup", DEFAULT_ROLLUP)
+    try:
+        window_seconds(window)
+    except ValueError:
+        return jsonify({"error": f"window must be one of: {', '.join(WINDOWS)}"}), 400
+    try:
+        rollup_seconds(rollup)
+    except ValueError:
+        return jsonify({"error": f"rollup must be one of: {', '.join(ROLLUPS)}"}), 400
+    try:
+        return jsonify(history_payload(window=window, rollup=rollup))
+    except Exception:
+        logger.exception("Failed to load system metrics history")
+        return jsonify({"error": "failed to load system metrics history"}), 500
 
 
 @app.route("/")

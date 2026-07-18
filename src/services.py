@@ -291,6 +291,15 @@ def _read_proc_stat_busy_total() -> tuple[int, int] | None:
     return total - idle, total
 
 
+def cpu_percent_from_delta(first: tuple[int, int], second: tuple[int, int]) -> float | None:
+    """CPU utilization percent from two (busy, total) /proc/stat snapshots."""
+    busy_delta = second[0] - first[0]
+    total_delta = second[1] - first[1]
+    if total_delta <= 0:
+        return None
+    return round(max(0.0, min(100.0, busy_delta / total_delta * 100)), 1)
+
+
 def _read_cpu_percent() -> float | None:
     """Instantaneous CPU utilization, sampled over a short window from /proc/stat."""
     first = _read_proc_stat_busy_total()
@@ -300,11 +309,7 @@ def _read_cpu_percent() -> float | None:
     second = _read_proc_stat_busy_total()
     if second is None:
         return None
-    busy_delta = second[0] - first[0]
-    total_delta = second[1] - first[1]
-    if total_delta <= 0:
-        return None
-    return round(max(0.0, min(100.0, busy_delta / total_delta * 100)), 1)
+    return cpu_percent_from_delta(first, second)
 
 
 def _read_memory() -> tuple[int, int, float] | None:

@@ -220,3 +220,54 @@ def test_send_alert_telegram_failure(mock_send, client):
     assert response.status_code == 502
     assert response.get_json() == {"ok": False, "error": "failed to send alert"}
     mock_send.assert_called_once()
+
+
+@patch("src.system_metrics.is_linux", return_value=False)
+def test_system_info_history_dev_mode(mock_is_linux, client):
+    """GET /api/system-info/history returns canned samples off-Pi."""
+    response = client.get("/api/system-info/history?window=1h&rollup=10m")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["window"] == "1h"
+    assert payload["rollup"] == "10m"
+    assert len(payload["samples"]) > 0
+    assert "temperature_c" in payload["samples"][0]
+
+
+@patch("src.app.is_linux", return_value=False)
+@patch("src.system_metrics.is_linux", return_value=False)
+def test_system_info_includes_temperature_avg_24h(mock_metrics_linux, mock_app_linux, client):
+    """GET /api/system-info includes 24h avg and max temperature alongside live vitals."""
+    response = client.get("/api/system-info")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert "temperature_c" in payload
+    assert payload["temperature_avg_24h"] is not None
+    assert payload["temperature_max_24h"] is not None
+    assert 40.0 <= payload["temperature_avg_24h"] <= 60.0
+    assert payload["temperature_max_24h"] >= payload["temperature_avg_24h"]
+
+
+def test_system_info_history_rejects_bad_window(client):
+    response = client.get("/api/system-info/history?window=2h")
+    assert response.status_code == 400
+    assert "window" in response.get_json()["error"]
+
+
+def test_system_info_history_rejects_bad_rollup(client):
+    response = client.get("/api/system-info/history?window=1h&rollup=5m")
+    assert response.status_code == 400
+    assert "rollup" in response.get_json()["error"]
+
+
+@patch("src.app.is_linux", return_value=False)
+def test_index_home_omits_dashboard_title(mock_is_linux, client):
+    """Home view no longer shows the Dashboard heading or System meta."""
+    response = client.get("/")
+    assert response.status_code == 200
+    html = response.data.decode()
+    assert "content-header__title" not in html
+    assert 'id="systemHeading"' not in html
+    assert 'id="systemMetricsChart"' in html
+    assert 'id="systemChart"' in html
+    assert 'id="systemChartCollapse"' in html

@@ -39,6 +39,9 @@
         <symbol id="icon-chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M15 18l-6-6 6-6" />
         </symbol>
+        <symbol id="icon-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 9l6 6 6-6" />
+        </symbol>
         <symbol id="icon-external" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" />
         </symbol>
@@ -177,15 +180,12 @@
 
         <!-- Main Content -->
         <main class="main-content">
+            {% if current %}
             <header class="content-header">
-                <h1 class="content-header__title">
-                    {% if current %}{{ current }}{% else %}Dashboard{% endif %}
-                </h1>
+                <h1 class="content-header__title">{{ current }}</h1>
                 <div class="content-header__actions">
-                    {% if current %}
                     <div id="alertSettingsControl" data-service="{{ current }}"></div>
-                    {% endif %}
-                    {% if selected_service_info and current %}
+                    {% if selected_service_info %}
                     <form method="POST" action="/restart" data-service="{{ current }}"
                           onsubmit="return confirm('Restart ' + this.dataset.service + '?');">
                         <input type="hidden" name="service" value="{{ current }}">
@@ -203,6 +203,7 @@
                     {% endif %}
                 </div>
             </header>
+            {% endif %}
 
             <div class="content-body {% if selected_service_info %}content-body--service-view{% endif %}">
                 {% if selected_service_info %}
@@ -261,13 +262,53 @@
                 {% else %}
                 <!-- Dashboard Home View -->
                 <div class="dashboard-home">
-                    <section class="dash-section" aria-labelledby="systemHeading">
-                        <div class="dash-section__head">
-                            <h2 id="systemHeading" class="dash-section__title">System</h2>
-                            <span id="systemMeta" class="dash-section__meta"></span>
-                        </div>
+                    <section class="dash-section" aria-label="System metrics">
                         <div id="systemMetrics" class="metric-grid" aria-busy="true" aria-live="polite">
                             <p class="metric-grid__placeholder">Loading system info…</p>
+                        </div>
+                        <div class="system-chart" id="systemChart">
+                            <button type="button"
+                                    class="system-chart__collapse"
+                                    id="systemChartCollapse"
+                                    aria-expanded="true"
+                                    aria-controls="systemChartBody">
+                                <svg class="system-chart__collapse-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg>
+                                <span>History</span>
+                            </button>
+                            <div class="system-chart__body" id="systemChartBody">
+                                <div class="system-chart__toolbar">
+                                    <div class="system-chart__series" role="group" aria-label="Toggle metrics">
+                                        <button type="button" class="system-chart__toggle is-active" data-series="cpu" aria-pressed="true">CPU</button>
+                                        <button type="button" class="system-chart__toggle is-active" data-series="disk" aria-pressed="true">Disk</button>
+                                        <button type="button" class="system-chart__toggle is-active" data-series="temperature" aria-pressed="true">Temp</button>
+                                        <button type="button" class="system-chart__toggle is-active" data-series="memory" aria-pressed="true">Memory</button>
+                                    </div>
+                                    <div class="system-chart__filters">
+                                        <div class="system-chart__filter">
+                                            <span class="system-chart__filter-label" id="systemChartWindowSizeLabel">window size</span>
+                                            <div class="system-chart__rollups" role="group" aria-labelledby="systemChartWindowSizeLabel">
+                                                <button type="button" class="system-chart__rollup is-active" data-rollup="30s" aria-pressed="true">30s</button>
+                                                <button type="button" class="system-chart__rollup" data-rollup="2m" aria-pressed="false">2m</button>
+                                                <button type="button" class="system-chart__rollup" data-rollup="10m" aria-pressed="false">10m</button>
+                                                <button type="button" class="system-chart__rollup" data-rollup="30m" aria-pressed="false">30m</button>
+                                            </div>
+                                        </div>
+                                        <div class="system-chart__filter">
+                                            <span class="system-chart__filter-label" id="systemChartLookbackLabel">lookback</span>
+                                            <div class="system-chart__ranges" role="group" aria-labelledby="systemChartLookbackLabel">
+                                                <button type="button" class="system-chart__range" data-window="1h" aria-pressed="false">1h</button>
+                                                <button type="button" class="system-chart__range" data-window="6h" aria-pressed="false">6h</button>
+                                                <button type="button" class="system-chart__range" data-window="24h" aria-pressed="false">24h</button>
+                                                <button type="button" class="system-chart__range is-active" data-window="7d" aria-pressed="true">7d</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="system-chart__canvas-wrap">
+                                    <div class="system-chart__y-label" id="systemChartYLabel" aria-hidden="true"></div>
+                                    <canvas id="systemMetricsChart" aria-label="System metrics over time"></canvas>
+                                </div>
+                            </div>
                         </div>
                     </section>
 
@@ -295,12 +336,14 @@
     <!-- Accessibility Live Region -->
     <div aria-live="polite" aria-atomic="true" class="sr-only" id="statusAnnouncer"></div>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
     <script src="{{ url_for('static', filename='notifications.js') }}" defer></script>
     <script src="{{ url_for('static', filename='ui-shell.js') }}" defer></script>
     <script src="{{ url_for('static', filename='services-list.js') }}" defer></script>
     <script src="{{ url_for('static', filename='log-stream.js') }}" defer></script>
     <script src="{{ url_for('static', filename='sidebar-details.js') }}" defer></script>
     <script src="{{ url_for('static', filename='system-info.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='system-metrics-chart.js') }}" defer></script>
     <script src="{{ url_for('static', filename='main.js') }}" defer></script>
 </body>
 </html>

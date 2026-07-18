@@ -9,6 +9,7 @@ import schedule
 from requests import RequestException
 
 from src.services import get_service_status, get_services
+from src.system_metrics import SAMPLE_INTERVAL_SECONDS, start_metrics_sampler
 from src.telegram import send_service_failure_alert
 
 logger = logging.getLogger(__name__)
@@ -126,10 +127,14 @@ def schedule_loop():
 
 
 def start_scheduler():
-    """Start the background scheduler thread."""
+    """Start the background scheduler and system-metrics sampler threads."""
+    start_metrics_sampler()
     schedule_thread = threading.Thread(target=schedule_loop, daemon=True)
     schedule_thread.start()
-    logger.info("Scheduler thread started")
+    logger.info(
+        "Scheduler thread started (health check every 5m; metrics 1Hz→%ss avg)",
+        SAMPLE_INTERVAL_SECONDS,
+    )
 
 
 if __name__ == "__main__":
