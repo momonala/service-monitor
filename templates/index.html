@@ -89,11 +89,6 @@
     <!-- Mobile Overlay (backdrop when sidebar is open) -->
     <div id="sidebarOverlay" class="sidebar-overlay" aria-hidden="true"></div>
 
-    <!-- Mobile Hamburger Button -->
-    <button id="mobileHamburger" class="mobile-hamburger" aria-label="Open navigation menu">
-        <svg aria-hidden="true"><use href="#icon-menu"></use></svg>
-    </button>
-
     <div class="app-container">
         <!-- Sidebar -->
         <aside id="sidebar" class="sidebar" aria-label="Service navigation">
@@ -180,6 +175,13 @@
 
         <!-- Main Content -->
         <main class="main-content">
+            <header class="mobile-nav-bar">
+                <button id="mobileHamburger" class="mobile-hamburger icon-button" aria-label="Open navigation menu">
+                    <svg aria-hidden="true"><use href="#icon-menu"></use></svg>
+                </button>
+                <a href="{{ url_for('index') }}" class="mobile-nav-bar__title">Service Monitor</a>
+            </header>
+
             {% if current %}
             <header class="content-header">
                 <h1 class="content-header__title">{{ current }}</h1>

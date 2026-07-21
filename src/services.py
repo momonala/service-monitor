@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 SERVICES_CACHE_TTL_SECONDS = 5.0
 CI_STATUS_CACHE_TTL_SECONDS = 60.0
 _services_cache: tuple[float, list[str]] | None = None
-_ci_status_cache: dict[str, tuple[float, str]] = {}
+_ci_status_cache: dict[str, tuple[float, str | None]] = {}
 
 
 @dataclass
@@ -57,8 +57,12 @@ def parse_service_name(service_name: str) -> tuple[str, str | None]:
     return (project_group, suffix)
 
 
-def get_ci_status(repo_name: str, use_cache: bool = True) -> str:
-    """Get CI status from GitHub Actions API with a short TTL cache."""
+def get_ci_status(repo_name: str, use_cache: bool = True) -> str | None:
+    """Get CI status from GitHub Actions API with a short TTL cache.
+
+    Returns None when the repo or workflow is missing (e.g. self-hosted clones
+    with no GitHub Actions), so the dashboard omits the CI badge.
+    """
     now = time.monotonic()
     if use_cache:
         cached = _ci_status_cache.get(repo_name)
@@ -73,6 +77,10 @@ def get_ci_status(repo_name: str, use_cache: bool = True) -> str:
         headers["Authorization"] = f"token {GITHUB_TOKEN}"
     try:
         response = requests.get(url, headers=headers, timeout=5)
+        if response.status_code == 404:
+            logger.debug("No GitHub Actions CI workflow for %s", repo_name)
+            _ci_status_cache[repo_name] = (now, None)
+            return None
         response.raise_for_status()
         data = response.json()
         if not data.get("workflow_runs"):

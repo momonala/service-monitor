@@ -210,6 +210,26 @@ def test_get_ci_status_other_conclusion(mock_get):
 
 
 @patch("src.services.requests.get")
+def test_get_ci_status_not_found(mock_get):
+    """Return None when repo or workflow does not exist on GitHub."""
+    mock_response = mock_get.return_value
+    mock_response.status_code = 404
+    assert get_ci_status("vbb-rest") is None
+    mock_response.raise_for_status.assert_not_called()
+
+
+@patch("src.services.requests.get")
+def test_get_ci_status_not_found_cached(mock_get):
+    """Cache missing-workflow lookups to avoid repeated GitHub API calls."""
+    mock_response = mock_get.return_value
+    mock_response.status_code = 404
+
+    assert get_ci_status("vbb-rest") is None
+    assert get_ci_status("vbb-rest") is None
+    mock_get.assert_called_once()
+
+
+@patch("src.services.requests.get")
 def test_get_ci_status_request_exception(mock_get):
     """Return error on request exceptions."""
     import requests
