@@ -418,6 +418,16 @@
         if (pinnedToEdge) {
             scrollToActiveEdge(el);
         }
+
+        scheduleApplyLogFilters();
+    }
+
+    let appendFilterTimer = null;
+
+    /** Debounce filter passes so initial SSE bursts batch into one apply. */
+    function scheduleApplyLogFilters() {
+        clearTimeout(appendFilterTimer);
+        appendFilterTimer = setTimeout(applyLogFilters, 50);
     }
 
     /**

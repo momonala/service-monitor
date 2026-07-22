@@ -86,6 +86,15 @@
         return cssToken(series.colorVar);
     }
 
+    function withOpacity(color, alpha) {
+        const hex = color.replace('#', '');
+        if (hex.length !== 6) return color;
+        const r = parseInt(hex.slice(0, 2), 16);
+        const g = parseInt(hex.slice(2, 4), 16);
+        const b = parseInt(hex.slice(4, 6), 16);
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
     function setPressed(btn, active) {
         btn.classList.toggle('is-active', active);
         btn.setAttribute('aria-pressed', String(active));
@@ -174,7 +183,7 @@
             label: isMax ? `${series.label} max` : series.label,
             data: [],
             parsing: false,
-            borderColor: seriesColor(series),
+            borderColor: isMax ? withOpacity(seriesColor(series), 0.5) : seriesColor(series),
             backgroundColor: 'transparent',
             borderDash: isMax ? [4, 4] : [],
             yAxisID: SHARED_Y_AXIS,
