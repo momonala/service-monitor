@@ -158,9 +158,9 @@
                             <span class="service-tooltip" aria-hidden="true">{{ svc.name }}</span>
                         </a>
                         {% if svc.ci_status %}
-                        <span class="service-details__item service-details__item--ci service-details__item--ci-{{ svc.ci_status }}">
+                        <a class="service-details__item service-details__item--ci service-details__item--ci-{{ svc.ci_status }}" href="https://github.com/momonala/{{ svc.project_group }}/actions/workflows/ci.yml" target="_blank" rel="noopener" title="View CI on GitHub">
                             <svg class="service-details__icon" aria-label="CI {{ svc.ci_status }}"><use href="#icon-{% if svc.ci_status == 'success' %}check-circle{% elif svc.ci_status == 'failure' %}x-circle{% else %}alert-triangle{% endif %}"></use></svg>
-                        </span>
+                        </a>
                         {% endif %}
                         {% if svc.uptime %}
                         <span class="service-uptime">{{ svc.uptime }}</span>

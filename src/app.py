@@ -193,6 +193,7 @@ def sidebar_details():
             "uptime": status.uptime,
             "last_error": status.last_error,
             "ci_status": status.ci_status,
+            "project_group": status.project_group,
         }
         for status in detailed_statuses
     ]

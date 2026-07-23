@@ -319,6 +319,8 @@ textarea:focus-visible {
     align-items: center;
     gap: 0.25em;
     justify-content: center;
+    cursor: pointer;
+    text-decoration: none;
 }
 
 .service-details__item--ci-success { color: var(--color-status-active); }
