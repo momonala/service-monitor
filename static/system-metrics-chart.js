@@ -29,19 +29,19 @@
             unit: '%',
             colorVar: '--color-series-disk',
         },
-        temperature: {
-            key: 'temperature_c',
-            label: 'Temp',
-            displayLabel: 'Temp (°C)',
-            unit: '°C',
-            colorVar: '--color-series-temp',
-        },
         memory: {
             key: 'memory_used_pct',
             label: 'Memory',
             displayLabel: 'Memory %',
             unit: '%',
             colorVar: '--color-series-memory',
+        },
+        temperature: {
+            key: 'temperature_c',
+            label: 'Temp',
+            displayLabel: 'Temp (°C)',
+            unit: '°C',
+            colorVar: '--color-series-temp',
         },
     };
     const SERIES_ORDER = Object.keys(SERIES);

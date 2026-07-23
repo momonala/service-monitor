@@ -46,13 +46,17 @@
         if (status.ci_status) {
             const ciIcon = status.ci_status === 'success' ? 'check-circle' : status.ci_status === 'failure' ? 'x-circle' : 'alert-triangle';
             const ciClass = `service-details__item service-details__item--ci service-details__item--ci-${status.ci_status}`;
-            const ciSpan = document.createElement('span');
-            ciSpan.className = ciClass;
+            const ciLink = document.createElement('a');
+            ciLink.className = ciClass;
+            ciLink.href = `https://github.com/momonala/${status.project_group}/actions/workflows/ci.yml`;
+            ciLink.target = '_blank';
+            ciLink.rel = 'noopener';
+            ciLink.title = 'View CI on GitHub';
             const ciSvg = buildIcon(ciIcon);
             ciSvg.setAttribute('aria-label', `CI ${status.ci_status}`);
             ciSvg.removeAttribute('aria-hidden');
-            ciSpan.appendChild(ciSvg);
-            grid.appendChild(ciSpan);
+            ciLink.appendChild(ciSvg);
+            grid.appendChild(ciLink);
         }
         if (status.uptime) {
             const item = document.createElement('span');
