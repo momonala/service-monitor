@@ -933,6 +933,18 @@ textarea:focus-visible {
     height: var(--system-chart-height);
 }
 
+/* In the service-detail view the chart shares vertical space with the status header and
+   live logs, so keep it compact and stop it from growing at the logs' expense. */
+.system-chart--service {
+    flex-shrink: 0;
+    margin-top: 0;
+    margin-bottom: var(--spacing-md);
+}
+
+.system-chart--service .system-chart__canvas-wrap {
+    height: 12rem;
+}
+
 .system-chart__y-label {
     display: flex;
     flex-direction: row;

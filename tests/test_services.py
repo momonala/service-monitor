@@ -1,5 +1,6 @@
 """Tests for services.py module."""
 
+import subprocess
 from unittest.mock import patch
 
 import pytest
@@ -19,6 +20,7 @@ from src.services import (
     parse_service_name,
     parse_timer_next,
     parse_uptime,
+    read_service_metrics,
 )
 
 
@@ -344,3 +346,31 @@ def test_get_system_info_returns_dataclass():
     assert isinstance(info, SystemInfo)
     assert isinstance(info.hostname, str)
     assert info.cpu_count is None or info.cpu_count >= 1
+
+
+def test_read_service_metrics_parses_blocks(monkeypatch):
+    """Each unit's block is parsed into (memory_bytes, cpu_nsec); the unset sentinel becomes None."""
+    stdout = (
+        "MemoryCurrent=209715200\nCPUUsageNSec=1500000000\n"
+        "\n"
+        "MemoryCurrent=18446744073709551615\nCPUUsageNSec=42\n"
+    )
+    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr="")
+    monkeypatch.setattr(services_module.subprocess, "run", lambda *a, **k: completed)
+    metrics = read_service_metrics(["projects_foo.service", "projects_bar.service"])
+    assert metrics["projects_foo.service"] == (209715200, 1500000000)
+    assert metrics["projects_bar.service"] == (None, 42)  # MemoryCurrent unset -> None
+
+
+def test_read_service_metrics_empty_units_skips_subprocess(monkeypatch):
+    def _boom(*a, **k):
+        raise AssertionError("subprocess should not run for empty units")
+
+    monkeypatch.setattr(services_module.subprocess, "run", _boom)
+    assert read_service_metrics([]) == {}
+
+
+def test_read_service_metrics_returns_empty_on_failure(monkeypatch):
+    completed = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="boom")
+    monkeypatch.setattr(services_module.subprocess, "run", lambda *a, **k: completed)
+    assert read_service_metrics(["projects_foo.service"]) == {}

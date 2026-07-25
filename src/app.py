@@ -31,6 +31,7 @@ from src.system_metrics import (
     WINDOWS,
     history_payload,
     rollup_seconds,
+    service_history_payload,
     temperature_window_stats,
     window_seconds,
 )
@@ -238,6 +239,31 @@ def system_info_history():
     except Exception:
         logger.exception("Failed to load system metrics history")
         return jsonify({"error": "failed to load system metrics history"}), 500
+
+
+@app.route("/api/services/history")
+def service_history():
+    """Return one service's RAM/CPU time series for the per-service detail chart."""
+    service = request.args.get("service", "").strip()
+    window = request.args.get("window", DEFAULT_WINDOW)
+    rollup = request.args.get("rollup", DEFAULT_ROLLUP)
+    if not service:
+        return jsonify({"error": "service is required"}), 400
+    if is_linux() and service not in get_services():
+        return jsonify({"error": f"unknown service: {service}"}), 400
+    try:
+        window_seconds(window)
+    except ValueError:
+        return jsonify({"error": f"window must be one of: {', '.join(WINDOWS)}"}), 400
+    try:
+        rollup_seconds(rollup)
+    except ValueError:
+        return jsonify({"error": f"rollup must be one of: {', '.join(ROLLUPS)}"}), 400
+    try:
+        return jsonify(service_history_payload(service, window=window, rollup=rollup))
+    except Exception:
+        logger.exception("Failed to load service metrics history")
+        return jsonify({"error": "failed to load service metrics history"}), 500
 
 
 @app.route("/")

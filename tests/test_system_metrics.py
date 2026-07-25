@@ -10,16 +10,23 @@ from src.services import SystemInfo
 from src.system_metrics import (
     MAX_RETURN_POINTS,
     MetricsAggregator,
+    ServiceCpuTracker,
+    ServiceSample,
     SystemSample,
     average_temperature,
     average_ticks,
     canned_history,
     ensure_schema,
     get_history,
+    get_service_history,
     history_payload,
     prune_old_samples,
     record_sample,
+    record_service_samples,
     sample_from_info,
+    sample_services,
+    service_cpu_percent,
+    service_history_payload,
 )
 
 
@@ -344,3 +351,106 @@ def test_get_history_applies_rollup(metrics_db: Path, monkeypatch):
     assert samples[0].temperature_c_max == 55.0
     assert samples[1].temperature_c == 65.0
     assert samples[1].temperature_c_max == 75.0
+
+
+# ---- Per-service metrics ----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("prev_nsec", "cur_nsec", "prev_ts", "cur_ts", "cpu_count", "expected"),
+    [
+        (0, 15 * 10**9, 100.0, 130.0, 4, 12.5),  # 15s CPU over 30s wall on 4 cores
+        (0, 30 * 10**9, 100.0, 130.0, 1, 100.0),  # fully saturating a single core
+        (0, 0, 100.0, 130.0, 4, 0.0),  # idle
+        (10**9, 0, 100.0, 130.0, 4, None),  # counter reset (service restarted)
+        (0, 10**9, 100.0, 100.0, 4, None),  # non-positive interval
+        (0, 10**9, 100.0, 130.0, None, None),  # unknown core count
+    ],
+)
+def test_service_cpu_percent(prev_nsec, cur_nsec, prev_ts, cur_ts, cpu_count, expected):
+    assert service_cpu_percent(prev_nsec, cur_nsec, prev_ts, cur_ts, cpu_count) == expected
+
+
+def test_service_cpu_tracker_first_sample_none_then_percent():
+    tracker = ServiceCpuTracker()
+    assert tracker.read_percent("svc", 10**9, 100.0, 4) is None  # no prior read
+    # +30s of CPU over 30s wall on 4 cores -> 25%
+    assert tracker.read_percent("svc", 10**9 + 30 * 10**9, 130.0, 4) == 25.0
+
+
+def test_service_cpu_tracker_forget_drops_dead_units():
+    tracker = ServiceCpuTracker()
+    tracker.read_percent("a", 10**9, 100.0, 4)
+    tracker.read_percent("b", 10**9, 100.0, 4)
+    tracker.forget({"a"})
+    assert "b" not in tracker._prev
+    assert "a" in tracker._prev
+
+
+def test_record_and_get_service_history(metrics_db: Path):
+    now = 1_700_000_000.0
+    record_service_samples(
+        [
+            ServiceSample(now - 100, "projects_foo.service", 120.0, 5.0),
+            ServiceSample(now - 100, "projects_bar.service", 60.0, 1.0),
+            ServiceSample(now - 50, "projects_foo.service", 130.0, 7.0),
+        ],
+        db_path=metrics_db,
+    )
+    foo = get_service_history("projects_foo.service", window="1h", now=now, db_path=metrics_db)
+    assert [s.ts for s in foo] == [now - 100, now - 50]
+    assert [s.memory_used_mb for s in foo] == [120.0, 130.0]
+    # Other services are not mixed in.
+    bar = get_service_history("projects_bar.service", window="1h", now=now, db_path=metrics_db)
+    assert len(bar) == 1
+
+
+def test_get_service_history_applies_rollup(metrics_db: Path):
+    now = 1_700_000_120.0
+    for offset, cpu, mem in ((0, 10, 100), (30, 20, 110), (60, 30, 120), (90, 40, 130)):
+        record_service_samples(
+            [ServiceSample(now - 120 + offset, "projects_foo.service", float(mem), float(cpu))],
+            db_path=metrics_db,
+        )
+    samples = get_service_history(
+        "projects_foo.service", window="1h", rollup="2m", now=now, db_path=metrics_db
+    )
+    assert len(samples) == 2
+    assert samples[0].cpu_percent == 15.0
+    assert samples[0].memory_used_mb == 105.0
+    assert samples[1].cpu_percent == 35.0
+
+
+def test_prune_removes_service_samples(metrics_db: Path):
+    now = 1_700_000_000.0
+    record_service_samples(
+        [ServiceSample(now - 8 * 24 * 3600, "projects_foo.service", 100.0, 5.0)], db_path=metrics_db
+    )
+    record_service_samples([ServiceSample(now - 60, "projects_foo.service", 110.0, 6.0)], db_path=metrics_db)
+    prune_old_samples(now=now, retention_seconds=7 * 24 * 3600, db_path=metrics_db)
+    remaining = get_service_history("projects_foo.service", window="7d", now=now, db_path=metrics_db)
+    assert len(remaining) == 1
+    assert remaining[0].ts == now - 60
+
+
+def test_sample_services_reads_memory_and_cpu(monkeypatch):
+    metrics = {
+        "projects_foo.service": (200 * 1024 * 1024, 10**9),  # 200 MiB, some CPU
+        "projects_bar.service": (None, None),  # unset
+    }
+    monkeypatch.setattr("src.system_metrics.read_service_metrics", lambda units: metrics)
+    tracker = ServiceCpuTracker()
+    samples = sample_services(list(metrics), tracker, cpu_count=4, ts=100.0)
+    by_name = {s.service: s for s in samples}
+    assert by_name["projects_foo.service"].memory_used_mb == 200.0
+    assert by_name["projects_foo.service"].cpu_percent is None  # first read has no delta
+    assert by_name["projects_bar.service"].memory_used_mb is None
+
+
+def test_service_history_payload_off_linux(monkeypatch):
+    monkeypatch.setattr("src.system_metrics.is_linux", lambda: False)
+    payload = service_history_payload("projects_foo.service", window="6h", rollup="2m")
+    assert payload["service"] == "projects_foo.service"
+    assert payload["window"] == "6h"
+    assert payload["samples"]
+    assert {"ts", "service", "memory_used_mb", "cpu_percent"} <= payload["samples"][0].keys()

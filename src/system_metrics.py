@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import shutil
 import sqlite3
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -23,7 +24,9 @@ from src.services import (
     _read_memory,
     _read_proc_stat_busy_total,
     cpu_percent_from_delta,
+    get_services,
     is_linux,
+    read_service_metrics,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,6 +75,16 @@ class SystemSample:
     cpu_percent_max: float | None = None
     memory_used_pct_max: float | None = None
     disk_used_pct_max: float | None = None
+
+
+@dataclass(frozen=True)
+class ServiceSample:
+    """One per-service vitals point. Persisted every SAMPLE_INTERVAL_SECONDS, one row per service."""
+
+    ts: float
+    service: str
+    memory_used_mb: float | None
+    cpu_percent: float | None
 
 
 class CpuDeltaTracker:
@@ -148,6 +161,18 @@ def ensure_schema(db_path: Path = DB_PATH) -> None:
             )
             """)
         _migrate_max_columns(conn)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS service_samples (
+                ts REAL NOT NULL,
+                service TEXT NOT NULL,
+                memory_used_mb REAL,
+                cpu_percent REAL,
+                PRIMARY KEY (ts, service)
+            )
+            """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_service_samples_service_ts ON service_samples (service, ts)"
+        )
     _schema_ready.add(db_path)
 
 
@@ -176,6 +201,21 @@ def record_sample(sample: SystemSample, db_path: Path = DB_PATH) -> None:
         )
 
 
+def record_service_samples(samples: list[ServiceSample], db_path: Path = DB_PATH) -> None:
+    """Insert or replace one row per service for a single sample timestamp."""
+    if not samples:
+        return
+    ensure_schema(db_path)
+    with _connect(db_path) as conn:
+        conn.executemany(
+            """
+            INSERT OR REPLACE INTO service_samples (ts, service, memory_used_mb, cpu_percent)
+            VALUES (?, ?, ?, ?)
+            """,
+            [(s.ts, s.service, s.memory_used_mb, s.cpu_percent) for s in samples],
+        )
+
+
 def prune_old_samples(
     now: float | None = None,
     retention_seconds: int = RETENTION_SECONDS,
@@ -186,7 +226,9 @@ def prune_old_samples(
     cutoff = (time.time() if now is None else now) - retention_seconds
     with _connect(db_path) as conn:
         cursor = conn.execute("DELETE FROM system_samples WHERE ts < ?", (cutoff,))
-        return cursor.rowcount
+        deleted = cursor.rowcount
+        conn.execute("DELETE FROM service_samples WHERE ts < ?", (cutoff,))
+        return deleted
 
 
 def sample_from_info(info: SystemInfo, ts: float | None = None) -> SystemSample:
@@ -260,6 +302,76 @@ def read_metrics_tick(cpu_tracker: CpuDeltaTracker, ts: float | None = None) -> 
     )
 
 
+def service_cpu_percent(
+    prev_nsec: int,
+    cur_nsec: int,
+    prev_ts: float,
+    cur_ts: float,
+    cpu_count: int | None,
+) -> float | None:
+    """Per-service CPU percent from two cumulative CPUUsageNSec reads, normalized by core count.
+
+    Returns None when the interval is non-positive, the core count is unknown, or the counter
+    went backwards (the service restarted and CPUUsageNSec reset to zero).
+    """
+    wall_delta = cur_ts - prev_ts
+    if wall_delta <= 0 or not cpu_count:
+        return None
+    cpu_delta_nsec = cur_nsec - prev_nsec
+    if cpu_delta_nsec < 0:
+        return None
+    percent = cpu_delta_nsec / (wall_delta * 1e9 * cpu_count) * 100
+    return round(max(0.0, min(100.0, percent)), 1)
+
+
+class ServiceCpuTracker:
+    """Turn cumulative CPUUsageNSec readings into a per-service CPU percent across 30s samples."""
+
+    def __init__(self) -> None:
+        self._prev: dict[str, tuple[float, int]] = {}  # unit -> (ts, cpu_nsec)
+
+    def read_percent(self, unit: str, cpu_nsec: int | None, ts: float, cpu_count: int | None) -> float | None:
+        previous = self._prev.get(unit)
+        if cpu_nsec is not None:
+            self._prev[unit] = (ts, cpu_nsec)
+        if previous is None or cpu_nsec is None:
+            return None
+        prev_ts, prev_nsec = previous
+        return service_cpu_percent(prev_nsec, cpu_nsec, prev_ts, ts, cpu_count)
+
+    def forget(self, live_units: set[str]) -> None:
+        """Drop trackers for units that no longer exist so restarts recompute cleanly."""
+        for unit in [u for u in self._prev if u not in live_units]:
+            del self._prev[unit]
+
+
+def sample_services(
+    units: list[str],
+    cpu_tracker: ServiceCpuTracker,
+    cpu_count: int | None,
+    ts: float | None = None,
+) -> list[ServiceSample]:
+    """Read per-service memory and CPU for the given units and build one sample each.
+
+    CPU percent is None on a service's first sample (no prior CPUUsageNSec to diff against).
+    """
+    ts = time.time() if ts is None else ts
+    metrics = read_service_metrics(units)
+    cpu_tracker.forget(set(metrics))
+    samples: list[ServiceSample] = []
+    for unit, (memory_bytes, cpu_nsec) in metrics.items():
+        memory_used_mb = None if memory_bytes is None else round(memory_bytes / (1024 * 1024), 1)
+        samples.append(
+            ServiceSample(
+                ts=ts,
+                service=unit,
+                memory_used_mb=memory_used_mb,
+                cpu_percent=cpu_tracker.read_percent(unit, cpu_nsec, ts, cpu_count),
+            )
+        )
+    return samples
+
+
 class MetricsAggregator:
     """Accumulate 1Hz ticks and flush one avg+max row every SAMPLE_INTERVAL_SECONDS."""
 
@@ -299,6 +411,8 @@ def metrics_sampler_loop(
 
     aggregator = MetricsAggregator(db_path=db_path, ticks_per_sample=ticks_per_sample)
     cpu_tracker = CpuDeltaTracker()
+    service_cpu_tracker = ServiceCpuTracker()
+    cpu_count = os.cpu_count()
     logger.info(
         "System metrics sampler started (%ss poll, %ss store)",
         poll_interval_seconds,
@@ -306,7 +420,12 @@ def metrics_sampler_loop(
     )
     while stop_event is None or not stop_event.is_set():
         try:
-            aggregator.add_tick(read_metrics_tick(cpu_tracker))
+            # Per-service metrics ride the same 30s flush: sample them when the host row is stored.
+            if aggregator.add_tick(read_metrics_tick(cpu_tracker)) is not None:
+                record_service_samples(
+                    sample_services(get_services(), service_cpu_tracker, cpu_count),
+                    db_path=db_path,
+                )
         except Exception:
             logger.exception("Failed to sample system metrics tick")
         if stop_event is None:
@@ -347,25 +466,31 @@ def _aggregate_bucket(bucket: list[SystemSample], ts: float) -> SystemSample:
     )
 
 
-def _downsample(samples: list[SystemSample], max_points: int = MAX_RETURN_POINTS) -> list[SystemSample]:
-    """Bucket samples so chart payloads stay bounded (avg of avgs, max of maxes)."""
+# Aggregators collapse a bucket of samples (of type T) into one sample stamped at a given ts.
+Aggregator = Callable[[list, float], object]
+
+
+def _downsample(
+    samples: list, max_points: int = MAX_RETURN_POINTS, aggregate: Aggregator = _aggregate_bucket
+) -> list:
+    """Bucket samples by count so chart payloads stay bounded."""
     if len(samples) <= max_points:
         return samples
     bucket_size = math.ceil(len(samples) / max_points)
-    out: list[SystemSample] = []
+    out: list = []
     for i in range(0, len(samples), bucket_size):
         bucket = samples[i : i + bucket_size]
-        out.append(_aggregate_bucket(bucket, bucket[len(bucket) // 2].ts))
+        out.append(aggregate(bucket, bucket[len(bucket) // 2].ts))
     return out
 
 
-def _rollup_by_time(samples: list[SystemSample], bucket_seconds: int) -> list[SystemSample]:
+def _rollup_by_time(samples: list, bucket_seconds: int, aggregate: Aggregator = _aggregate_bucket) -> list:
     """Aggregate samples into fixed-width time buckets aligned to the Unix epoch."""
     if len(samples) <= 1 or bucket_seconds <= SAMPLE_INTERVAL_SECONDS:
         return samples
 
-    out: list[SystemSample] = []
-    bucket: list[SystemSample] = []
+    out: list = []
+    bucket: list = []
     bucket_start: float | None = None
 
     for sample in samples:
@@ -373,14 +498,24 @@ def _rollup_by_time(samples: list[SystemSample], bucket_seconds: int) -> list[Sy
         if bucket_start is None:
             bucket_start = start
         if start != bucket_start:
-            out.append(_aggregate_bucket(bucket, bucket_start + bucket_seconds / 2))
+            out.append(aggregate(bucket, bucket_start + bucket_seconds / 2))
             bucket = []
             bucket_start = start
         bucket.append(sample)
 
     if bucket and bucket_start is not None:
-        out.append(_aggregate_bucket(bucket, bucket_start + bucket_seconds / 2))
+        out.append(aggregate(bucket, bucket_start + bucket_seconds / 2))
     return out
+
+
+def _aggregate_service_bucket(bucket: list[ServiceSample], ts: float) -> ServiceSample:
+    """Collapse a bucket of one service's samples into a single averaged sample."""
+    return ServiceSample(
+        ts=ts,
+        service=bucket[0].service,
+        memory_used_mb=_avg([s.memory_used_mb for s in bucket]),
+        cpu_percent=_avg([s.cpu_percent for s in bucket]),
+    )
 
 
 def _row_to_sample(row: tuple) -> SystemSample:
@@ -475,6 +610,85 @@ def history_payload(
         else canned_history(window=window, rollup=rollup)
     )
     return {"window": window, "rollup": rollup, "samples": [asdict(sample) for sample in samples]}
+
+
+def get_service_history(
+    service: str,
+    window: str = DEFAULT_WINDOW,
+    rollup: str = DEFAULT_ROLLUP,
+    now: float | None = None,
+    db_path: Path = DB_PATH,
+    max_points: int = MAX_RETURN_POINTS,
+) -> list[ServiceSample]:
+    """Return one service's samples in the requested window, rollup-averaged then capped."""
+    span = window_seconds(window)
+    bucket = rollup_seconds(rollup)
+    ensure_schema(db_path)
+    end = time.time() if now is None else now
+    start = end - span
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT ts, memory_used_mb, cpu_percent
+            FROM service_samples
+            WHERE service = ? AND ts >= ? AND ts <= ?
+            ORDER BY ts ASC
+            """,
+            (service, start, end),
+        ).fetchall()
+    samples = [
+        ServiceSample(ts=row[0], service=service, memory_used_mb=row[1], cpu_percent=row[2]) for row in rows
+    ]
+    rolled = _rollup_by_time(samples, bucket, aggregate=_aggregate_service_bucket)
+    return _downsample(rolled, max_points=max_points, aggregate=_aggregate_service_bucket)
+
+
+def canned_service_history(
+    service: str,
+    window: str = DEFAULT_WINDOW,
+    rollup: str = DEFAULT_ROLLUP,
+    now: float | None = None,
+) -> list[ServiceSample]:
+    """Synthetic per-service history for off-Pi / dev mode so the chart has something to draw."""
+    span = window_seconds(window)
+    bucket = rollup_seconds(rollup)
+    end = time.time() if now is None else now
+    step = max(SAMPLE_INTERVAL_SECONDS, span // 240)
+    # Vary the shape per service so different services look distinct in dev.
+    seed = sum(ord(c) for c in service)
+    base_mem = 40 + seed % 120
+    samples: list[ServiceSample] = []
+    t = end - span
+    while t <= end:
+        phase = (t - (end - span)) / span * math.tau
+        cpu = round(6 + 14 * abs(math.sin(phase * 2.3 + seed)), 1)
+        mem = round(base_mem + 10 * math.sin(phase * 0.8 + seed), 1)
+        samples.append(ServiceSample(ts=t, service=service, memory_used_mb=mem, cpu_percent=cpu))
+        t += step
+    rolled = _rollup_by_time(samples, bucket, aggregate=_aggregate_service_bucket)
+    return _downsample(rolled, aggregate=_aggregate_service_bucket)
+
+
+def service_history_payload(
+    service: str,
+    window: str = DEFAULT_WINDOW,
+    rollup: str = DEFAULT_ROLLUP,
+    db_path: Path = DB_PATH,
+) -> dict:
+    """JSON-ready per-service history payload for the API."""
+    window_seconds(window)  # validate before I/O
+    rollup_seconds(rollup)
+    samples = (
+        get_service_history(service, window=window, rollup=rollup, db_path=db_path)
+        if is_linux()
+        else canned_service_history(service, window=window, rollup=rollup)
+    )
+    return {
+        "service": service,
+        "window": window,
+        "rollup": rollup,
+        "samples": [asdict(sample) for sample in samples],
+    }
 
 
 def temperature_window_stats(

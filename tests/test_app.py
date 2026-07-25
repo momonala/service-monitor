@@ -261,6 +261,33 @@ def test_system_info_history_rejects_bad_rollup(client):
 
 
 @patch("src.app.is_linux", return_value=False)
+@patch("src.system_metrics.is_linux", return_value=False)
+def test_service_history_dev_mode(mock_metrics_linux, mock_app_linux, client):
+    """GET /api/services/history returns canned per-service samples off-Pi."""
+    response = client.get("/api/services/history?service=projects_foo.service&window=6h&rollup=2m")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["service"] == "projects_foo.service"
+    assert payload["window"] == "6h"
+    assert len(payload["samples"]) > 0
+    assert {"ts", "memory_used_mb", "cpu_percent"} <= payload["samples"][0].keys()
+
+
+def test_service_history_requires_service(client):
+    response = client.get("/api/services/history")
+    assert response.status_code == 400
+    assert "service" in response.get_json()["error"]
+
+
+@patch("src.app.is_linux", return_value=True)
+@patch("src.app.get_services", return_value=["projects_foo.service"])
+def test_service_history_rejects_unknown_service(mock_services, mock_is_linux, client):
+    response = client.get("/api/services/history?service=projects_unknown.service")
+    assert response.status_code == 400
+    assert "unknown service" in response.get_json()["error"]
+
+
+@patch("src.app.is_linux", return_value=False)
 def test_index_home_omits_dashboard_title(mock_is_linux, client):
     """Home view no longer shows the Dashboard heading or System meta."""
     response = client.get("/")

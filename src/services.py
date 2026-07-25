@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 SERVICES_CACHE_TTL_SECONDS = 5.0
 CI_STATUS_CACHE_TTL_SECONDS = 60.0
+SYSTEMD_UNSET = 2**64 - 1  # value systemd reports for an unset uint64 property (e.g. MemoryCurrent=[not set])
 _services_cache: tuple[float, list[str]] | None = None
 _ci_status_cache: dict[str, tuple[float, str | None]] = {}
 
@@ -318,6 +319,47 @@ def _read_cpu_percent() -> float | None:
     if second is None:
         return None
     return cpu_percent_from_delta(first, second)
+
+
+def read_service_metrics(units: list[str]) -> dict[str, tuple[int | None, int | None]]:
+    """Return {unit: (memory_bytes, cpu_usage_nsec)} for the given units in one systemctl call.
+
+    MemoryCurrent is the current cgroup RSS in bytes; CPUUsageNSec is cumulative CPU time in
+    nanoseconds since the unit started. Either value is None when systemd reports it as unset
+    (`[not set]`, rendered as SYSTEMD_UNSET) or the unit is missing from the output.
+    """
+    if not units:
+        return {}
+    result = subprocess.run(
+        ["systemctl", "show", "--property=MemoryCurrent,CPUUsageNSec", *units],
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        logger.warning("systemctl show failed: %s", result.stderr.strip())
+        return {}
+
+    # `systemctl show <a> <b>` emits one blank-line-separated block per unit, in argument order.
+    metrics: dict[str, tuple[int | None, int | None]] = {}
+    for unit, block in zip(units, result.stdout.strip().split("\n\n")):
+        values: dict[str, int | None] = {}
+        for line in block.splitlines():
+            key, _, raw = line.partition("=")
+            values[key] = _parse_systemd_counter(raw)
+        metrics[unit] = (values.get("MemoryCurrent"), values.get("CPUUsageNSec"))
+    return metrics
+
+
+def _parse_systemd_counter(raw: str) -> int | None:
+    """Parse a numeric systemd property; None when unset (empty or the SYSTEMD_UNSET sentinel)."""
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return None if value == SYSTEMD_UNSET else value
 
 
 def _read_memory() -> tuple[int, int, float] | None:

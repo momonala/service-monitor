@@ -7,6 +7,7 @@
         window.ServiceMonitorLogStream?.init();
         window.ServiceMonitorSystemInfo?.init();
         window.ServiceMonitorSystemMetricsChart?.init();
+        window.ServiceMonitorServiceMetricsChart?.init();
         window.ServiceMonitorSidebarDetails?.load().catch((error) => {
             console.error('⚠️ Sidebar details load failed:', error);
         });

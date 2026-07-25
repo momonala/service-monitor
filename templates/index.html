@@ -213,6 +213,47 @@
                 <div class="service-info-panel">
                     <pre class="service-info service-info--status">{{ selected_service_info }}</pre>
                 </div>
+                <div class="system-chart system-chart--service" id="serviceChart" data-service="{{ current }}">
+                    <button type="button"
+                            class="system-chart__collapse"
+                            id="serviceChartCollapse"
+                            aria-expanded="true"
+                            aria-controls="serviceChartBody">
+                        <svg class="system-chart__collapse-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg>
+                        <span>Resource history</span>
+                    </button>
+                    <div class="system-chart__body" id="serviceChartBody">
+                        <div class="system-chart__toolbar">
+                            <div class="system-chart__series" role="group" aria-label="Toggle metrics">
+                                <button type="button" class="system-chart__toggle is-active" data-series="cpu" aria-pressed="true">CPU</button>
+                                <button type="button" class="system-chart__toggle is-active" data-series="memory" aria-pressed="true">Memory</button>
+                            </div>
+                            <div class="system-chart__filters">
+                                <div class="system-chart__filter">
+                                    <span class="system-chart__filter-label" id="serviceChartWindowSizeLabel">window size</span>
+                                    <div class="system-chart__rollups" role="group" aria-labelledby="serviceChartWindowSizeLabel">
+                                        <button type="button" class="system-chart__rollup" data-rollup="30s" aria-pressed="false">30s</button>
+                                        <button type="button" class="system-chart__rollup is-active" data-rollup="2m" aria-pressed="true">2m</button>
+                                        <button type="button" class="system-chart__rollup" data-rollup="10m" aria-pressed="false">10m</button>
+                                        <button type="button" class="system-chart__rollup" data-rollup="30m" aria-pressed="false">30m</button>
+                                    </div>
+                                </div>
+                                <div class="system-chart__filter">
+                                    <span class="system-chart__filter-label" id="serviceChartLookbackLabel">lookback</span>
+                                    <div class="system-chart__ranges" role="group" aria-labelledby="serviceChartLookbackLabel">
+                                        <button type="button" class="system-chart__range" data-window="1h" aria-pressed="false">1h</button>
+                                        <button type="button" class="system-chart__range" data-window="6h" aria-pressed="false">6h</button>
+                                        <button type="button" class="system-chart__range is-active" data-window="24h" aria-pressed="true">24h</button>
+                                        <button type="button" class="system-chart__range" data-window="7d" aria-pressed="false">7d</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="system-chart__canvas-wrap">
+                            <canvas id="serviceMetricsChart" aria-label="Service resource usage over time"></canvas>
+                        </div>
+                    </div>
+                </div>
                 <div class="log-stream-panel">
                     <div class="log-filters" aria-label="Log filters">
                         <label class="log-filter-field">
@@ -345,7 +386,9 @@
     <script src="{{ url_for('static', filename='log-stream.js') }}" defer></script>
     <script src="{{ url_for('static', filename='sidebar-details.js') }}" defer></script>
     <script src="{{ url_for('static', filename='system-info.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='chart-utils.js') }}" defer></script>
     <script src="{{ url_for('static', filename='system-metrics-chart.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='service-metrics-chart.js') }}" defer></script>
     <script src="{{ url_for('static', filename='main.js') }}" defer></script>
 </body>
 </html>
