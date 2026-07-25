@@ -270,7 +270,7 @@ def test_service_history_dev_mode(mock_metrics_linux, mock_app_linux, client):
     assert payload["service"] == "projects_foo.service"
     assert payload["window"] == "6h"
     assert len(payload["samples"]) > 0
-    assert {"ts", "memory_used_mb", "cpu_percent"} <= payload["samples"][0].keys()
+    assert {"ts", "memory_used_pct", "cpu_percent"} <= payload["samples"][0].keys()
 
 
 def test_service_history_requires_service(client):

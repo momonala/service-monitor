@@ -271,14 +271,18 @@ and the live logs). Read from the `service_samples` table. Off-Pi the route retu
   "window": "24h",
   "rollup": "2m",
   "samples": [
-    {"ts": 1720000000.0, "service": "projects_foo.service", "memory_used_mb": 123.4, "cpu_percent": 3.2}
+    {"ts": 1720000000.0, "service": "projects_foo.service", "memory_used_pct": 6.1, "cpu_percent": 3.2}
   ]
 }
 ```
 
-`memory_used_mb` is `MemoryCurrent` (cgroup RSS) in MiB; `cpu_percent` is the `CPUUsageNSec` delta over
-the sample interval, normalized by core count. `cpu_percent` is `null` on a service's first sample
-(no prior counter to diff) and after a restart (counter reset).
+Both values are a percent of the whole host, so they share one 0-100 axis in the chart.
+`memory_used_pct` is `MemoryCurrent` (cgroup RSS) over `MemTotal`; `cpu_percent` is the `CPUUsageNSec`
+delta over the sample interval, normalized by core count (100% = every core saturated).
+`cpu_percent` is `null` on a service's first sample (no prior counter to diff) and after a restart
+(counter reset). `memory_used_pct` is `null` when systemd reports `MemoryCurrent` as `[not set]`,
+which happens when the kernel's memory cgroup controller is disabled — on Raspberry Pi OS that needs
+`cgroup_enable=memory cgroup_memory=1` in `/boot/firmware/cmdline.txt`.
 
 ### POST `/api/alert`
 
@@ -362,7 +366,7 @@ system_samples  (host vitals, one row per 30s window; avg + max of the 1Hz ticks
 
 service_samples  (per-service vitals, one row per service per 30s window)
 ├── (ts REAL, service TEXT)   PRIMARY KEY
-├── memory_used_mb   REAL   # MemoryCurrent (cgroup RSS) in MiB
+├── memory_used_pct  REAL   # MemoryCurrent (cgroup RSS) / MemTotal; null when the memory cgroup is off
 └── cpu_percent      REAL   # CPUUsageNSec delta / interval / core count; null on first sample or after restart
 ```
 

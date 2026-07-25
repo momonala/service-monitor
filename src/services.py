@@ -362,6 +362,19 @@ def _parse_systemd_counter(raw: str) -> int | None:
     return None if value == SYSTEMD_UNSET else value
 
 
+def read_total_memory_bytes() -> int | None:
+    """Return MemTotal in bytes, or None when /proc/meminfo is unreadable (non-Linux)."""
+    try:
+        meminfo = Path("/proc/meminfo").read_text()
+    except OSError:
+        return None
+    for line in meminfo.splitlines():
+        key, _, rest = line.partition(":")
+        if key == "MemTotal":
+            return int(rest.strip().split()[0]) * 1024  # value is in kB
+    return None
+
+
 def _read_memory() -> tuple[int, int, float] | None:
     """Return (used_mb, total_mb, used_pct) parsed from /proc/meminfo."""
     try:

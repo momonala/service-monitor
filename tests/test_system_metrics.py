@@ -391,15 +391,15 @@ def test_record_and_get_service_history(metrics_db: Path):
     now = 1_700_000_000.0
     record_service_samples(
         [
-            ServiceSample(now - 100, "projects_foo.service", 120.0, 5.0),
-            ServiceSample(now - 100, "projects_bar.service", 60.0, 1.0),
-            ServiceSample(now - 50, "projects_foo.service", 130.0, 7.0),
+            ServiceSample(now - 100, "projects_foo.service", 12.0, 5.0),
+            ServiceSample(now - 100, "projects_bar.service", 6.0, 1.0),
+            ServiceSample(now - 50, "projects_foo.service", 13.0, 7.0),
         ],
         db_path=metrics_db,
     )
     foo = get_service_history("projects_foo.service", window="1h", now=now, db_path=metrics_db)
     assert [s.ts for s in foo] == [now - 100, now - 50]
-    assert [s.memory_used_mb for s in foo] == [120.0, 130.0]
+    assert [s.memory_used_pct for s in foo] == [12.0, 13.0]
     # Other services are not mixed in.
     bar = get_service_history("projects_bar.service", window="1h", now=now, db_path=metrics_db)
     assert len(bar) == 1
@@ -407,7 +407,7 @@ def test_record_and_get_service_history(metrics_db: Path):
 
 def test_get_service_history_applies_rollup(metrics_db: Path):
     now = 1_700_000_120.0
-    for offset, cpu, mem in ((0, 10, 100), (30, 20, 110), (60, 30, 120), (90, 40, 130)):
+    for offset, cpu, mem in ((0, 10, 10), (30, 20, 11), (60, 30, 12), (90, 40, 13)):
         record_service_samples(
             [ServiceSample(now - 120 + offset, "projects_foo.service", float(mem), float(cpu))],
             db_path=metrics_db,
@@ -417,7 +417,7 @@ def test_get_service_history_applies_rollup(metrics_db: Path):
     )
     assert len(samples) == 2
     assert samples[0].cpu_percent == 15.0
-    assert samples[0].memory_used_mb == 105.0
+    assert samples[0].memory_used_pct == 10.5
     assert samples[1].cpu_percent == 35.0
 
 
@@ -440,11 +440,13 @@ def test_sample_services_reads_memory_and_cpu(monkeypatch):
     }
     monkeypatch.setattr("src.system_metrics.read_service_metrics", lambda units: metrics)
     tracker = ServiceCpuTracker()
-    samples = sample_services(list(metrics), tracker, cpu_count=4, ts=100.0)
+    samples = sample_services(
+        list(metrics), tracker, cpu_count=4, total_memory_bytes=2000 * 1024 * 1024, ts=100.0
+    )
     by_name = {s.service: s for s in samples}
-    assert by_name["projects_foo.service"].memory_used_mb == 200.0
+    assert by_name["projects_foo.service"].memory_used_pct == 10.0  # 200 MiB of 2000 MiB
     assert by_name["projects_foo.service"].cpu_percent is None  # first read has no delta
-    assert by_name["projects_bar.service"].memory_used_mb is None
+    assert by_name["projects_bar.service"].memory_used_pct is None
 
 
 def test_service_history_payload_off_linux(monkeypatch):
@@ -453,4 +455,4 @@ def test_service_history_payload_off_linux(monkeypatch):
     assert payload["service"] == "projects_foo.service"
     assert payload["window"] == "6h"
     assert payload["samples"]
-    assert {"ts", "service", "memory_used_mb", "cpu_percent"} <= payload["samples"][0].keys()
+    assert {"ts", "service", "memory_used_pct", "cpu_percent"} <= payload["samples"][0].keys()

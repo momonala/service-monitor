@@ -1,6 +1,9 @@
 // Per-service RAM/CPU history chart, shown in the service-detail view between the status
-// header and the live logs. Reuses the .system-chart* styles and SMChartUtils helpers;
-// unlike the host chart it plots two series on two axes (CPU % left, Memory MB right).
+// header and the live logs. Reuses the .system-chart* styles and SMChartUtils helpers.
+// Both series are a percent of the whole host, so they share one left axis: memory is
+// MemoryCurrent over total RAM, CPU is CPUUsageNSec over all cores. A single service usually
+// sits in the low single digits of the host, so the axis auto-scales from 0 to the data
+// rather than locking to 0-100 like the host chart.
 (function() {
     'use strict';
 
@@ -16,11 +19,12 @@
     const VALID_ROLLUPS = new Set(['30s', '2m', '10m', '30m']);
     const STORAGE_COLLAPSED = 'servicemonitor:service-chart-collapsed';
     const STORAGE_ROLLUP = 'servicemonitor:service-chart-rollup';
-    const CPU_AXIS = 'yCpu';
-    const MEM_AXIS = 'yMem';
+    const SHARED_Y_AXIS = 'y';
     const TOOLTIP_MONO = "'SF Mono', Monaco, 'Cascadia Code', Consolas, monospace";
     const TOOLTIP_LABEL_W = 8;
     const TOOLTIP_VALUE_W = 8;
+    // Floor for the auto-scaled y axis, so a flat idle service doesn't render as noise.
+    const Y_AXIS_SUGGESTED_MAX = 1;
 
     // Order drives toggles, datasets, and tooltip rows.
     const SERIES = {
@@ -29,15 +33,13 @@
             label: 'CPU',
             displayLabel: 'CPU %',
             unit: '%',
-            axis: CPU_AXIS,
             colorVar: '--color-series-cpu',
         },
         memory: {
-            key: 'memory_used_mb',
+            key: 'memory_used_pct',
             label: 'Memory',
-            displayLabel: 'Mem MB',
-            unit: 'MB',
-            axis: MEM_AXIS,
+            displayLabel: 'Memory %',
+            unit: '%',
             colorVar: '--color-series-memory',
         },
     };
@@ -119,7 +121,7 @@
             parsing: false,
             borderColor: color,
             backgroundColor: withOpacity(color, 0.08),
-            yAxisID: series.axis,
+            yAxisID: SHARED_Y_AXIS,
             tension: 0.35,
             cubicInterpolationMode: 'monotone',
             borderWidth: 1.75,
@@ -150,23 +152,21 @@
                 grid: { color: border },
                 border: { color: border },
             },
-            [CPU_AXIS]: {
+            [SHARED_Y_AXIS]: {
                 type: 'linear',
                 position: 'left',
                 min: 0,
-                max: 100,
-                title: { display: true, text: 'CPU %', color: cssToken('--color-series-cpu'), font: { size: 10 } },
-                ticks: { color: muted, font: { size: 10 }, maxTicksLimit: 6 },
+                suggestedMax: Y_AXIS_SUGGESTED_MAX,
+                display: true,
+                ticks: {
+                    color: muted,
+                    font: { size: 10 },
+                    maxTicksLimit: 6,
+                    callback(value) {
+                        return `${this.getLabelForValue(value)}%`;
+                    },
+                },
                 grid: { color: border, drawOnChartArea: true },
-                border: { color: border },
-            },
-            [MEM_AXIS]: {
-                type: 'linear',
-                position: 'right',
-                min: 0,
-                title: { display: true, text: 'Mem MB', color: cssToken('--color-series-memory'), font: { size: 10 } },
-                ticks: { color: muted, font: { size: 10 }, maxTicksLimit: 6 },
-                grid: { drawOnChartArea: false },
                 border: { color: border },
             },
         };
@@ -240,9 +240,6 @@
         chart.data.datasets.forEach((dataset) => {
             dataset.hidden = !visibleSeries[dataset.seriesId];
         });
-        // Hide an axis when its only series is toggled off.
-        chart.options.scales[CPU_AXIS].display = visibleSeries.cpu;
-        chart.options.scales[MEM_AXIS].display = visibleSeries.memory;
         chart.update('none');
     }
 

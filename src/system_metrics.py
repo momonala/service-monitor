@@ -27,6 +27,7 @@ from src.services import (
     get_services,
     is_linux,
     read_service_metrics,
+    read_total_memory_bytes,
 )
 
 logger = logging.getLogger(__name__)
@@ -83,7 +84,7 @@ class ServiceSample:
 
     ts: float
     service: str
-    memory_used_mb: float | None
+    memory_used_pct: float | None
     cpu_percent: float | None
 
 
@@ -142,6 +143,13 @@ def _migrate_max_columns(conn: sqlite3.Connection) -> None:
         conn.execute(f"ALTER TABLE system_samples ADD COLUMN {column} REAL")
 
 
+def _drop_mb_service_samples(conn: sqlite3.Connection) -> None:
+    """Drop service_samples when it still stores memory in MiB; the rows can't be rescaled to %."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(service_samples)")}
+    if "memory_used_mb" in existing:
+        conn.execute("DROP TABLE service_samples")
+
+
 def ensure_schema(db_path: Path = DB_PATH) -> None:
     """Create the samples table once per database path and migrate max columns."""
     if db_path in _schema_ready:
@@ -161,11 +169,12 @@ def ensure_schema(db_path: Path = DB_PATH) -> None:
             )
             """)
         _migrate_max_columns(conn)
+        _drop_mb_service_samples(conn)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS service_samples (
                 ts REAL NOT NULL,
                 service TEXT NOT NULL,
-                memory_used_mb REAL,
+                memory_used_pct REAL,
                 cpu_percent REAL,
                 PRIMARY KEY (ts, service)
             )
@@ -209,10 +218,10 @@ def record_service_samples(samples: list[ServiceSample], db_path: Path = DB_PATH
     with _connect(db_path) as conn:
         conn.executemany(
             """
-            INSERT OR REPLACE INTO service_samples (ts, service, memory_used_mb, cpu_percent)
+            INSERT OR REPLACE INTO service_samples (ts, service, memory_used_pct, cpu_percent)
             VALUES (?, ?, ?, ?)
             """,
-            [(s.ts, s.service, s.memory_used_mb, s.cpu_percent) for s in samples],
+            [(s.ts, s.service, s.memory_used_pct, s.cpu_percent) for s in samples],
         )
 
 
@@ -324,6 +333,13 @@ def service_cpu_percent(
     return round(max(0.0, min(100.0, percent)), 1)
 
 
+def service_memory_percent(memory_bytes: int | None, total_memory_bytes: int | None) -> float | None:
+    """Per-service MemoryCurrent as a percent of host RAM. None when either value is unavailable."""
+    if memory_bytes is None or not total_memory_bytes:
+        return None
+    return round(memory_bytes / total_memory_bytes * 100, 1)
+
+
 class ServiceCpuTracker:
     """Turn cumulative CPUUsageNSec readings into a per-service CPU percent across 30s samples."""
 
@@ -349,23 +365,24 @@ def sample_services(
     units: list[str],
     cpu_tracker: ServiceCpuTracker,
     cpu_count: int | None,
+    total_memory_bytes: int | None,
     ts: float | None = None,
 ) -> list[ServiceSample]:
     """Read per-service memory and CPU for the given units and build one sample each.
 
-    CPU percent is None on a service's first sample (no prior CPUUsageNSec to diff against).
+    Both values are a percent of the whole host: memory of total RAM, CPU of all cores. CPU
+    percent is None on a service's first sample (no prior CPUUsageNSec to diff against).
     """
     ts = time.time() if ts is None else ts
     metrics = read_service_metrics(units)
     cpu_tracker.forget(set(metrics))
     samples: list[ServiceSample] = []
     for unit, (memory_bytes, cpu_nsec) in metrics.items():
-        memory_used_mb = None if memory_bytes is None else round(memory_bytes / (1024 * 1024), 1)
         samples.append(
             ServiceSample(
                 ts=ts,
                 service=unit,
-                memory_used_mb=memory_used_mb,
+                memory_used_pct=service_memory_percent(memory_bytes, total_memory_bytes),
                 cpu_percent=cpu_tracker.read_percent(unit, cpu_nsec, ts, cpu_count),
             )
         )
@@ -394,7 +411,7 @@ class MetricsAggregator:
         record_sample(aggregated, db_path=self.db_path)
         deleted = prune_old_samples(db_path=self.db_path)
         if deleted:
-            logger.info("Pruned %s expired system metric samples", deleted)
+            logger.debug("Pruned %s expired system metric samples", deleted)
         return aggregated
 
 
@@ -413,6 +430,7 @@ def metrics_sampler_loop(
     cpu_tracker = CpuDeltaTracker()
     service_cpu_tracker = ServiceCpuTracker()
     cpu_count = os.cpu_count()
+    total_memory_bytes = read_total_memory_bytes()
     logger.info(
         "System metrics sampler started (%ss poll, %ss store)",
         poll_interval_seconds,
@@ -423,7 +441,7 @@ def metrics_sampler_loop(
             # Per-service metrics ride the same 30s flush: sample them when the host row is stored.
             if aggregator.add_tick(read_metrics_tick(cpu_tracker)) is not None:
                 record_service_samples(
-                    sample_services(get_services(), service_cpu_tracker, cpu_count),
+                    sample_services(get_services(), service_cpu_tracker, cpu_count, total_memory_bytes),
                     db_path=db_path,
                 )
         except Exception:
@@ -513,7 +531,7 @@ def _aggregate_service_bucket(bucket: list[ServiceSample], ts: float) -> Service
     return ServiceSample(
         ts=ts,
         service=bucket[0].service,
-        memory_used_mb=_avg([s.memory_used_mb for s in bucket]),
+        memory_used_pct=_avg([s.memory_used_pct for s in bucket]),
         cpu_percent=_avg([s.cpu_percent for s in bucket]),
     )
 
@@ -629,7 +647,7 @@ def get_service_history(
     with _connect(db_path) as conn:
         rows = conn.execute(
             """
-            SELECT ts, memory_used_mb, cpu_percent
+            SELECT ts, memory_used_pct, cpu_percent
             FROM service_samples
             WHERE service = ? AND ts >= ? AND ts <= ?
             ORDER BY ts ASC
@@ -637,7 +655,7 @@ def get_service_history(
             (service, start, end),
         ).fetchall()
     samples = [
-        ServiceSample(ts=row[0], service=service, memory_used_mb=row[1], cpu_percent=row[2]) for row in rows
+        ServiceSample(ts=row[0], service=service, memory_used_pct=row[1], cpu_percent=row[2]) for row in rows
     ]
     rolled = _rollup_by_time(samples, bucket, aggregate=_aggregate_service_bucket)
     return _downsample(rolled, max_points=max_points, aggregate=_aggregate_service_bucket)
@@ -656,14 +674,14 @@ def canned_service_history(
     step = max(SAMPLE_INTERVAL_SECONDS, span // 240)
     # Vary the shape per service so different services look distinct in dev.
     seed = sum(ord(c) for c in service)
-    base_mem = 40 + seed % 120
+    base_mem = 2 + seed % 12
     samples: list[ServiceSample] = []
     t = end - span
     while t <= end:
         phase = (t - (end - span)) / span * math.tau
         cpu = round(6 + 14 * abs(math.sin(phase * 2.3 + seed)), 1)
-        mem = round(base_mem + 10 * math.sin(phase * 0.8 + seed), 1)
-        samples.append(ServiceSample(ts=t, service=service, memory_used_mb=mem, cpu_percent=cpu))
+        mem = round(max(0.1, base_mem + 1.5 * math.sin(phase * 0.8 + seed)), 1)
+        samples.append(ServiceSample(ts=t, service=service, memory_used_pct=mem, cpu_percent=cpu))
         t += step
     rolled = _rollup_by_time(samples, bucket, aggregate=_aggregate_service_bucket)
     return _downsample(rolled, aggregate=_aggregate_service_bucket)

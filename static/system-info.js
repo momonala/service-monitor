@@ -4,11 +4,11 @@
     const REFRESH_INTERVAL = 10000;
 
     // Usage thresholds (percent) at which a metric reads as elevated / critical.
-    const WARN_PCT = 80;
-    const CRIT_PCT = 90;
+    const WARN_PCT = 60;
+    const CRIT_PCT = 85;
     // Raspberry Pi soft-throttles around 80°C; warn well before that.
-    const WARN_TEMP_C = 65;
-    const CRIT_TEMP_C = 80;
+    const WARN_TEMP_C = 60;
+    const CRIT_TEMP_C = 75;
     // Temperature bar maps this Celsius window onto 0–100% fill.
     const TEMP_BAR_MIN_C = 40;
     const TEMP_BAR_MAX_C = 80;
