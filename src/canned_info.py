@@ -29,6 +29,7 @@ websites = [
     {"name": "Trace", "url": "https://trace.mnalavadi.org"},
     {"name": "spyglass", "url": "https://spyglass.mnalavadi.org"},
     {"name": "What's On the Menu?", "url": "https://whats-on-the-menu.mnalavadi.org"},
+    {"name": "personal-finances", "url": "https://personal-finances.mnalavadi.org"},
 ]
 websites.sort(key=lambda x: x["name"].lower())
 
