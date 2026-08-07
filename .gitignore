@@ -88,7 +88,7 @@ event_cache.json
 app_calendar_events.json
 recent_locations.html
 static/*.html
-system_metrics.db
+data/
 alert_settings.json
 
 # Local development

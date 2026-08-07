@@ -32,7 +32,7 @@ from src.services import (
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path(__file__).parent.parent / "system_metrics.db"
+DB_PATH = Path(__file__).parent.parent / "data" / "system_metrics.db"
 RETENTION_SECONDS = 7 * 24 * 3600
 POLL_INTERVAL_SECONDS = 1
 SAMPLE_INTERVAL_SECONDS = 30
