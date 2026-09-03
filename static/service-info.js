@@ -35,10 +35,7 @@
     async function refresh(container, service) {
         try {
             const res = await fetch(`/api/services/current?service=${encodeURIComponent(service)}`);
-            if (!res.ok) {
-                showGridError(container, `Failed to load service metrics (HTTP ${res.status}).`);
-                throw new Error(`services/current ${res.status}`);
-            }
+            if (!res.ok) throw new Error(`services/current ${res.status}`);
             render(container, await res.json());
         } catch (err) {
             console.error('Service metrics refresh failed:', err);

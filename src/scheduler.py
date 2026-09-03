@@ -29,20 +29,21 @@ def _load_settings() -> None:
         return
     try:
         data = json.loads(_SETTINGS_FILE.read_text())
-        with _alert_lock:
-            _alert_settings.update({k: v for k, v in data.items() if v in VALID_FREQUENCIES})
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         logger.warning("Failed to load alert settings from %s", _SETTINGS_FILE, exc_info=True)
+        return
+    with _alert_lock:
+        _alert_settings.update({k: v for k, v in data.items() if v in VALID_FREQUENCIES})
 
 
 def _save_settings() -> None:
+    with _alert_lock:
+        data = dict(_alert_settings)
+    tmp = _SETTINGS_FILE.with_suffix(".json.tmp")
     try:
-        with _alert_lock:
-            data = dict(_alert_settings)
-        tmp = _SETTINGS_FILE.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(data, indent=2))
         tmp.replace(_SETTINGS_FILE)
-    except Exception:
+    except OSError:
         logger.warning("Failed to save alert settings to %s", _SETTINGS_FILE, exc_info=True)
 
 
@@ -97,7 +98,7 @@ def _mark_alerted(service_name: str) -> None:
         _alerted_services[service_name] = datetime.now()
 
 
-def service_health_check():
+def service_health_check() -> None:
     """Check the health of services and send Telegram alerts for failures."""
     services = get_services()
     service_statuses = [get_service_status(svc) for svc in services]
@@ -117,7 +118,7 @@ def service_health_check():
         logger.info("Alert sent for %s", service_status.name)
 
 
-def schedule_loop():
+def schedule_loop() -> None:
     """Schedule the periodic tasks."""
     schedule.every(5).minutes.do(service_health_check)
     logger.info("Scheduled 5-minute service health check")
@@ -126,7 +127,7 @@ def schedule_loop():
         time.sleep(1)
 
 
-def start_scheduler():
+def start_scheduler() -> None:
     """Start the background scheduler and system-metrics sampler threads."""
     start_metrics_sampler()
     schedule_thread = threading.Thread(target=schedule_loop, daemon=True)

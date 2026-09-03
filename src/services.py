@@ -37,6 +37,18 @@ class ServiceStatus:
     suffix: str | None
     ci_status: str | None
 
+    @property
+    def is_timer(self) -> bool:
+        return self.name.endswith(".timer")
+
+    @property
+    def display_name(self) -> str:
+        """Unit name without the `projects_` prefix or the unit-type extension."""
+        stem = self.name.removeprefix("projects_")
+        for extension in (".service", ".timer"):
+            stem = stem.removesuffix(extension)
+        return stem
+
 
 def parse_service_name(service_name: str) -> tuple[str, str | None]:
     """Parse unit name to extract project group and optional suffix.
@@ -75,9 +87,7 @@ def get_ci_status(repo_name: str, use_cache: bool = True) -> str | None:
                 return cached_value
 
     url = f"https://api.github.com/repos/momonala/{repo_name}/actions/workflows/ci.yml/runs?per_page=1"
-    headers = {}
-    if GITHUB_TOKEN:
-        headers["Authorization"] = f"token {GITHUB_TOKEN}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
     try:
         response = requests.get(url, headers=headers, timeout=5)
         if response.status_code == 404:
@@ -85,26 +95,19 @@ def get_ci_status(repo_name: str, use_cache: bool = True) -> str | None:
             _ci_status_cache[repo_name] = (now, None)
             return None
         response.raise_for_status()
-        data = response.json()
-        if not data.get("workflow_runs"):
-            logger.warning("No workflow runs found for %s", repo_name)
-            return "error"
-        latest_run = data["workflow_runs"][0]
-        conclusion = latest_run.get("conclusion")
-        if conclusion == "success":
-            status = "success"
-        elif conclusion == "failure":
-            status = "failure"
-        else:
-            status = "error"
-        _ci_status_cache[repo_name] = (now, status)
-        return status
+        runs = response.json().get("workflow_runs")
     except requests.RequestException as exc:
         logger.error("Failed to fetch CI status for %s: %s", repo_name, exc)
         return "error"
-    except KeyError as exc:
-        logger.error("Unexpected API response format for %s: %s", repo_name, exc)
+
+    if not runs:
+        logger.warning("No workflow runs found for %s", repo_name)
         return "error"
+
+    conclusion = runs[0].get("conclusion")
+    status = conclusion if conclusion in ("success", "failure") else "error"
+    _ci_status_cache[repo_name] = (now, status)
+    return status
 
 
 def is_linux() -> bool:
@@ -146,14 +149,13 @@ def _format_uptime(raw: str) -> str:
     minutes_match = re.search(r"(\d+)\s*min", raw)
 
     total_days = int(days_match.group(1)) if days_match else 0
-    explicit_weeks = int(weeks_match.group(1)) if weeks_match else 0
-    w = explicit_weeks + total_days // 7
-    d = total_days % 7
+    weeks = (int(weeks_match.group(1)) if weeks_match else 0) + total_days // 7
+    days = total_days % 7
 
-    if w:
-        return f"{w}w"
-    if d:
-        return f"{d}d"
+    if weeks:
+        return f"{weeks}w"
+    if days:
+        return f"{days}d"
     if hours_match:
         return f"{hours_match.group(1)}h"
     if minutes_match:
@@ -177,19 +179,22 @@ def _parse_is_active(status_text: str) -> bool:
     return bool(re.search(r"Active:\s+active\s+\(", status_text, re.IGNORECASE))
 
 
-def parse_memory(status_text: str) -> str | None:
-    match = re.search(r"Memory: (.*?)(?:\n|$)", status_text)
+def _parse_status_field(status_text: str, field: str) -> str | None:
+    """Return the value of a `Field: value` line in `systemctl status` output."""
+    match = re.search(rf"{field}: (.*?)(?:\n|$)", status_text)
     return match.group(1).strip() if match else None
+
+
+def parse_memory(status_text: str) -> str | None:
+    return _parse_status_field(status_text, "Memory")
 
 
 def parse_cpu(status_text: str) -> str | None:
-    match = re.search(r"CPU: (.*?)(?:\n|$)", status_text)
-    return match.group(1).strip() if match else None
+    return _parse_status_field(status_text, "CPU")
 
 
 def parse_last_error(status_text: str) -> str | None:
-    match = re.search(r"Error: (.*?)(?:\n|$)", status_text)
-    return match.group(1).strip() if match else None
+    return _parse_status_field(status_text, "Error")
 
 
 def get_info_for_service(service: str, lines: int = 1000) -> str:
@@ -239,9 +244,7 @@ def get_service_status(service: str, include_ci: bool = True, status_lines: int 
     is_timer = service.endswith(".timer")
 
     # Only fetch CI status for primary project services (no suffix, not a timer)
-    ci_status = None
-    if include_ci and suffix is None and not is_timer:
-        ci_status = get_ci_status(project_group)
+    ci_status = get_ci_status(project_group) if include_ci and suffix is None and not is_timer else None
 
     uptime = None
     if is_active:
@@ -472,11 +475,18 @@ def get_system_info() -> SystemInfo:
     )
 
 
-def _read_uptime() -> str | None:
-    """Host uptime as a compact human string (e.g. '3d'), from /proc/uptime."""
+def _read_uptime_seconds() -> float | None:
+    """Seconds since boot from /proc/uptime, or None when it is unreadable (non-Linux)."""
     try:
-        seconds = float(Path("/proc/uptime").read_text().split()[0])
+        return float(Path("/proc/uptime").read_text().split()[0])
     except (OSError, ValueError, IndexError):
+        return None
+
+
+def _read_uptime() -> str | None:
+    """Host uptime as a compact human string (e.g. '3d')."""
+    seconds = _read_uptime_seconds()
+    if seconds is None:
         return None
     minutes, _ = divmod(int(seconds), 60)
     hours, minutes = divmod(minutes, 60)
@@ -489,9 +499,8 @@ def _read_uptime() -> str | None:
 
 
 def _read_boot_time() -> str | None:
-    """Last reboot timestamp (local time, ISO 8601) derived from /proc/uptime."""
-    try:
-        seconds = float(Path("/proc/uptime").read_text().split()[0])
-    except (OSError, ValueError, IndexError):
+    """Last reboot timestamp (local time, ISO 8601)."""
+    seconds = _read_uptime_seconds()
+    if seconds is None:
         return None
     return datetime.fromtimestamp(time.time() - seconds).isoformat()

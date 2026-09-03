@@ -226,25 +226,24 @@
         renderLogSpikeChart(visibleEntries, startTs, endTs);
     }
 
-    /**
-     * Setup event listeners for log filtering controls.
-     * Uses only 'change' to avoid double-firing on checkboxes/selects.
-     */
-    function setupLogFilters() {
-        const ids = ['logTimeFilterMode', 'logCountFilter', 'logSeverityFilter', 'logTextFilter', 'logCaseSensitive', 'logReverseDirection'];
+    const FILTER_CONTROL_IDS = [
+        'logTimeFilterMode',
+        'logCountFilter',
+        'logSeverityFilter',
+        'logTextFilter',
+        'logCaseSensitive',
+        'logReverseDirection',
+    ];
 
-        for (const id of ids) {
+    /** Re-apply filters whenever any control changes. */
+    function setupLogFilters() {
+        for (const id of FILTER_CONTROL_IDS) {
             const control = document.getElementById(id);
             if (!control) continue;
-            // Use 'input' for text fields, 'change' for everything else to avoid double-firing
-            const eventType = (control.type === 'text' || control.tagName === 'SELECT') ? 'input' : 'change';
-            control.addEventListener(eventType, () => {
-                if (id === 'logReverseDirection') syncLogDirection();
-                applyLogFilters();
-            });
+            // Checkboxes only settle on 'change'; text and selects should react as you type.
+            const eventType = control.type === 'checkbox' ? 'change' : 'input';
+            control.addEventListener(eventType, applyLogFilters);
         }
-
-        syncLogDirection();
         applyLogFilters();
     }
 
@@ -407,7 +406,6 @@
             element: span,
         });
 
-        // Evict oldest entries when cap is reached
         if (logEntries.length > MAX_LOG_ENTRIES) {
             const removed = logEntries.splice(0, logEntries.length - MAX_LOG_ENTRIES);
             for (const entry of removed) {
@@ -534,11 +532,12 @@
                 setupLogStream();
             }, reconnectDelay);
         };
+    }
 
-        window.addEventListener('beforeunload', () => {
-            if (reconnectTimer !== null) clearTimeout(reconnectTimer);
-            source.close();
-        }, { once: true });
+    function closeLogStream() {
+        if (reconnectTimer !== null) clearTimeout(reconnectTimer);
+        activeLogSource?.close();
+        activeLogSource = null;
     }
 
     let resizeFilterTimer = null;
@@ -550,6 +549,7 @@
             clearTimeout(resizeFilterTimer);
             resizeFilterTimer = setTimeout(applyLogFilters, 150);
         });
+        window.addEventListener('beforeunload', closeLogStream, { once: true });
     }
 
     window.ServiceMonitorLogStream = {

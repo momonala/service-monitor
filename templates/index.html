@@ -1,3 +1,23 @@
+{% macro chart_scale_controls(prefix, active_rollup, active_window) %}
+<div class="system-chart__filter">
+    <span class="system-chart__filter-label" id="{{ prefix }}WindowSizeLabel">rollup</span>
+    <div class="system-chart__rollups" role="group" aria-labelledby="{{ prefix }}WindowSizeLabel">
+        {% for rollup in ['30s', '2m', '10m', '30m'] %}
+        <button type="button" class="system-chart__rollup{{ ' is-active' if rollup == active_rollup }}"
+                data-rollup="{{ rollup }}" aria-pressed="{{ 'true' if rollup == active_rollup else 'false' }}">{{ rollup }}</button>
+        {% endfor %}
+    </div>
+</div>
+<div class="system-chart__filter">
+    <span class="system-chart__filter-label" id="{{ prefix }}LookbackLabel">lookback</span>
+    <div class="system-chart__ranges" role="group" aria-labelledby="{{ prefix }}LookbackLabel">
+        {% for window in ['1h', '6h', '24h', '7d'] %}
+        <button type="button" class="system-chart__range{{ ' is-active' if window == active_window }}"
+                data-window="{{ window }}" aria-pressed="{{ 'true' if window == active_window else 'false' }}">{{ window }}</button>
+        {% endfor %}
+    </div>
+</div>
+{% endmacro -%}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -173,19 +193,8 @@
                                 <use href="#icon-{% if svc.is_active %}activity{% elif svc.is_failed %}alert-circle{% else %}pause-circle{% endif %}"></use>
                             </svg>
                             <span class="service-name">
-                                {%- set _parts = svc.name.split('_', 1) -%}
-                                {%- if _parts|length == 2 -%}
-                                    {%- set _rest = _parts[1] -%}
-                                    {%- if _rest.endswith('.service') -%}
-                                        <span class="sn-core">{{ _rest[:-8] }}</span>
-                                    {%- elif _rest.endswith('.timer') -%}
-                                        <span class="sn-core">{{ _rest[:-6] }}</span><span class="sn-dim">.timer</span>
-                                    {%- else -%}
-                                        <span class="sn-core">{{ _rest }}</span>
-                                    {%- endif -%}
-                                {%- else -%}
-                                    {{ svc.name }}
-                                {%- endif -%}
+                                <span class="sn-core">{{ svc.display_name }}</span>
+                                {%- if svc.is_timer %}<span class="sn-dim">.timer</span>{% endif -%}
                             </span>
                             <span class="service-tooltip" aria-hidden="true">{{ svc.name }}</span>
                         </a>
@@ -214,6 +223,8 @@
                 {% if services %}</div>{% endif %}
             </nav>
         </aside>
+        <!-- Applies the persisted sidebar state before first paint; ui-shell.js is deferred
+             and would otherwise let a collapsed sidebar flash open. -->
         <script>try{var _s=document.getElementById('sidebar');if(_s){var _w=window.innerWidth;if(_w<640){_s.className='sidebar sidebar--closed';}else if(localStorage.getItem('servicemonitor:sidebar-collapsed')==='true'){_s.classList.add('sidebar--collapsed');}}}catch(e){}</script>
 
         <!-- Main Content -->
@@ -280,24 +291,7 @@
                                     <button type="button" class="system-chart__toggle is-active" data-series="memory" aria-pressed="true">Memory</button>
                                 </div>
                             </div>
-                            <div class="system-chart__filter">
-                                <span class="system-chart__filter-label" id="serviceChartWindowSizeLabel">rollup</span>
-                                <div class="system-chart__rollups" role="group" aria-labelledby="serviceChartWindowSizeLabel">
-                                    <button type="button" class="system-chart__rollup" data-rollup="30s" aria-pressed="false">30s</button>
-                                    <button type="button" class="system-chart__rollup is-active" data-rollup="2m" aria-pressed="true">2m</button>
-                                    <button type="button" class="system-chart__rollup" data-rollup="10m" aria-pressed="false">10m</button>
-                                    <button type="button" class="system-chart__rollup" data-rollup="30m" aria-pressed="false">30m</button>
-                                </div>
-                            </div>
-                            <div class="system-chart__filter">
-                                <span class="system-chart__filter-label" id="serviceChartLookbackLabel">lookback</span>
-                                <div class="system-chart__ranges" role="group" aria-labelledby="serviceChartLookbackLabel">
-                                    <button type="button" class="system-chart__range" data-window="1h" aria-pressed="false">1h</button>
-                                    <button type="button" class="system-chart__range" data-window="6h" aria-pressed="false">6h</button>
-                                    <button type="button" class="system-chart__range is-active" data-window="24h" aria-pressed="true">24h</button>
-                                    <button type="button" class="system-chart__range" data-window="7d" aria-pressed="false">7d</button>
-                                </div>
-                            </div>
+                            {{ chart_scale_controls('serviceChart', '2m', '24h') }}
                         </div>
                         <div class="system-chart__canvas-wrap">
                             <canvas id="serviceMetricsChart" aria-label="Service resource usage over time"></canvas>
@@ -372,24 +366,7 @@
                                             <button type="button" class="system-chart__toggle is-active" data-series="memory" aria-pressed="true">Memory</button>
                                         </div>
                                     </div>
-                                    <div class="system-chart__filter">
-                                        <span class="system-chart__filter-label" id="systemChartWindowSizeLabel">rollup</span>
-                                        <div class="system-chart__rollups" role="group" aria-labelledby="systemChartWindowSizeLabel">
-                                            <button type="button" class="system-chart__rollup is-active" data-rollup="30s" aria-pressed="true">30s</button>
-                                            <button type="button" class="system-chart__rollup" data-rollup="2m" aria-pressed="false">2m</button>
-                                            <button type="button" class="system-chart__rollup" data-rollup="10m" aria-pressed="false">10m</button>
-                                            <button type="button" class="system-chart__rollup" data-rollup="30m" aria-pressed="false">30m</button>
-                                        </div>
-                                    </div>
-                                    <div class="system-chart__filter">
-                                        <span class="system-chart__filter-label" id="systemChartLookbackLabel">lookback</span>
-                                        <div class="system-chart__ranges" role="group" aria-labelledby="systemChartLookbackLabel">
-                                            <button type="button" class="system-chart__range" data-window="1h" aria-pressed="false">1h</button>
-                                            <button type="button" class="system-chart__range" data-window="6h" aria-pressed="false">6h</button>
-                                            <button type="button" class="system-chart__range" data-window="24h" aria-pressed="false">24h</button>
-                                            <button type="button" class="system-chart__range is-active" data-window="7d" aria-pressed="true">7d</button>
-                                        </div>
-                                    </div>
+                                    {{ chart_scale_controls('systemChart', '30s', '7d') }}
                                 </div>
                                 <div class="system-chart__canvas-wrap">
                                     <div class="system-chart__y-label" id="systemChartYLabel" aria-hidden="true"></div>
@@ -437,6 +414,7 @@
     <script src="{{ url_for('static', filename='log-stream.js') }}" defer></script>
     <script src="{{ url_for('static', filename='sidebar-details.js') }}" defer></script>
     <script src="{{ url_for('static', filename='chart-utils.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='metric-grid.js') }}" defer></script>
     <script src="{{ url_for('static', filename='system-info.js') }}" defer></script>
     <script src="{{ url_for('static', filename='service-info.js') }}" defer></script>
     <script src="{{ url_for('static', filename='system-metrics-chart.js') }}" defer></script>

@@ -115,13 +115,18 @@ service-monitor/
 │   └── index.html      # Main dashboard template (Jinja2)
 ├── static/
 │   ├── app.css         # Full stylesheet (custom CSS, design tokens)
+│   ├── transitions.css # Motion tokens and t-* transition primitives
 │   ├── main.js         # Module bootstrap
+│   ├── transitions.js  # Toasts, accordions, sliding pills, skeletons, digit pop-in
 │   ├── ui-shell.js     # Sidebar open/close, hamburger, keyboard nav
 │   ├── services-list.js # Service list: search, auto-refresh, project colors
 │   ├── log-stream.js   # SSE log streaming, filtering (time/count/severity/text), spike chart, traceback grouping + highlight
 │   ├── sidebar-details.js # Async sidebar status/CI enrichment + alert frequency UI
+│   ├── metric-grid.js  # Shared metric-tile grid rendering (system, service, R2 panels)
 │   ├── system-info.js  # Dashboard home: polls /api/system-info, renders vitals grid
-│   ├── chart-utils.js  # Shared stateless helpers for both metric charts
+│   ├── service-info.js # Service detail: polls /api/services/current, renders CPU/mem tiles
+│   ├── r2-usage.js     # Dashboard home: Cloudflare R2 usage against the free tier
+│   ├── chart-utils.js  # Shared chart scaffolding: theme, scales, tooltip, pills, polling
 │   ├── system-metrics-chart.js  # Dashboard-home host history chart (4 series, /api/system-info/history)
 │   ├── service-metrics-chart.js # Service-detail per-service RAM/CPU chart (/api/services/history)
 │   └── notifications.js # ARIA live region announcements
@@ -131,6 +136,8 @@ service-monitor/
 │   ├── test_telegram.py
 │   ├── test_services.py
 │   ├── test_system_metrics.py
+│   ├── test_backup_status.py
+│   ├── test_r2_usage.py
 │   └── test_config.py
 ├── install/
 │   ├── install.sh
@@ -429,7 +436,7 @@ service_samples  (per-service vitals, one row per service per 30s window)
 | Variable | Location | Default | Description |
 |---|---|---|---|
 | `host` | `src/app.py` | `0.0.0.0` | Bind address |
-| `port` | `src/app.py` | `5001` | HTTP port |
+| `flask_port` | `pyproject.toml` `[tool.config]` | `5001` | HTTP port |
 | `service_pattern` | `src/services.py` | `projects_*` | systemctl filter pattern |
 | `DEFAULT_ALERT_FREQUENCY` | `src/scheduler.py` | `hourly` | Default frequency when a service has no saved setting |
 | `ALERT_RESET_HOUR` | `src/scheduler.py` | `6` | Hour (local time) at which the daily alert window resets |

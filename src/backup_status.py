@@ -135,7 +135,7 @@ def _status_for_db(
 
 
 def backup_statuses_for_groups(project_groups: list[str]) -> dict[str, BackupStatus]:
-    """Green/yellow/red backup freshness per project (systemd project_group).
+    """Backup freshness per project (systemd project_group).
 
     Only projects with at least one db in the manifest get an entry; callers should treat a
     missing key as "no backup icon for this service". Cached for CACHE_TTL_SECONDS since a fresh

@@ -17,7 +17,6 @@ canned_system_info = SystemInfo(
     disk_total_gb=117.6,
 )
 
-# Website links with icons (icon mapping centralized here, not in template)
 websites = [
     {"name": "cycle-tracker", "url": "https://cycle-tracker.mnalavadi.org"},
     {"name": "task-manager", "url": "https://task-manager.mnalavadi.org"},

@@ -1,7 +1,15 @@
-// Shared, stateless helpers for the system and per-service metric charts.
-// Kept dependency-free so both chart modules can build on the same primitives.
+// Shared pieces of the system and per-service metric charts: theming, segmented
+// controls, tooltip formatting, and the Chart.js scaffolding both build on.
+// Kept dependency-free apart from Chart.js itself.
 (function() {
     'use strict';
+
+    const REFRESH_INTERVAL = 30000;
+    const WINDOWS = new Set(['1h', '6h', '24h', '7d']);
+    const ROLLUPS = new Set(['30s', '2m', '10m', '30m']);
+    const TOOLTIP_FONT = "'SF Mono', Monaco, 'Cascadia Code', Consolas, monospace";
+    const AXIS_FONT_SIZE = 10;
+    const AXIS_MAX_TICKS = 6;
 
     function cssToken(name) {
         return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -14,6 +22,16 @@
         const g = parseInt(hex.slice(2, 4), 16);
         const b = parseInt(hex.slice(4, 6), 16);
         return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
+    /** The theme tokens every chart surface reads, resolved once per chart build. */
+    function chartTheme() {
+        return {
+            muted: cssToken('--color-text-muted'),
+            panel: cssToken('--color-bg-secondary'),
+            border: cssToken('--border-color'),
+            textPrimary: cssToken('--color-text-primary'),
+        };
     }
 
     function readLocal(key) {
@@ -44,6 +62,46 @@
         window.SMTransitions?.syncPills(root);
     }
 
+    /**
+     * Wire a segmented control (the rollup / lookback pills) to a single value.
+     * Selecting a new allowed value repaints the pressed state and notifies.
+     * @returns {{value: string}} live view of the current selection
+     */
+    function createChoiceGroup(root, selector, dataKey, allowed, initial, onChange) {
+        const group = { value: initial };
+        syncChoiceGroup(root, selector, dataKey, initial);
+        root.querySelectorAll(selector).forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const next = btn.dataset[dataKey];
+                if (!allowed.has(next) || next === group.value) return;
+                group.value = next;
+                syncChoiceGroup(root, selector, dataKey, next);
+                onChange(next);
+            });
+        });
+        return group;
+    }
+
+    /** Wire the per-series show/hide toggles onto a {seriesId: boolean} map. */
+    function bindSeriesToggles(root, visibleSeries, onToggle) {
+        root.querySelectorAll('.system-chart__toggle').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const id = btn.dataset.series;
+                if (!(id in visibleSeries)) return;
+                visibleSeries[id] = !visibleSeries[id];
+                setPressed(btn, visibleSeries[id]);
+                onToggle();
+            });
+        });
+    }
+
+    function applyHiddenSeries(chart, visibleSeries) {
+        chart.data.datasets.forEach((dataset) => {
+            dataset.hidden = !visibleSeries[dataset.seriesId];
+        });
+        chart.update('none');
+    }
+
     function padCell(value, width, align = 'left') {
         const text = String(value);
         if (text.length >= width) return text.slice(0, width);
@@ -64,130 +122,156 @@
         return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
     }
 
-    window.SMChartUtils = {
-        cssToken,
-        withOpacity,
-        readLocal,
-        writeLocal,
-        setPressed,
-        syncChoiceGroup,
-        padCell,
-        formatTooltipValue,
-        formatXTick,
-    };
-
-    // Shared tile-grid rendering used by the system-info and service-info panels
-    // (metric-grid / .metric markup in app.css). Both panels poll an endpoint on
-    // an interval and render CPU/memory-style tiles; this factors out the parts
-    // that don't vary: tile scaffolding, warn/crit thresholds, and error display.
-
-    function levelFor(value, warn, crit) {
-        if (value == null) return '';
-        if (value >= crit) return 'metric--crit';
-        if (value >= warn) return 'metric--warn';
-        return '';
+    /** Epoch-millisecond x axis. `getWindow` is read per tick so range changes relabel. */
+    function timeScale(theme, getWindow) {
+        return {
+            type: 'linear',
+            bounds: 'data',
+            offset: false,
+            ticks: {
+                color: theme.muted,
+                font: { size: AXIS_FONT_SIZE },
+                maxTicksLimit: AXIS_MAX_TICKS,
+                callback: (value) => formatXTick(value, getWindow()),
+            },
+            grid: { color: theme.border },
+            border: { color: theme.border },
+        };
     }
 
-    function formatValue(value, suffix = '') {
-        return value == null ? '—' : `${value}${suffix}`;
+    /** Tick/grid styling for a y axis; callers supply the range and any label callback. */
+    function valueScale(theme, options) {
+        return {
+            type: 'linear',
+            position: 'left',
+            display: true,
+            grid: { color: theme.border, drawOnChartArea: true },
+            border: { color: theme.border },
+            ...options,
+            ticks: {
+                color: theme.muted,
+                font: { size: AXIS_FONT_SIZE },
+                maxTicksLimit: AXIS_MAX_TICKS,
+                ...options.ticks,
+            },
+        };
     }
 
-    function barHtmlFor(tile) {
-        if (tile.dualBar) {
-            return `
-                <div class="metric__bar metric__bar--dual">
-                    <span class="metric__bar-current" data-role="bar"></span>
-                    <span class="metric__bar-avg" data-role="bar-avg" hidden></span>
-                    <span class="metric__bar-max" data-role="bar-max" hidden></span>
-                </div>`;
+    /** Monospaced tooltip shared by both charts; `overrides.callbacks` merge onto the defaults. */
+    function buildTooltip(theme, overrides = {}) {
+        const { callbacks, ...rest } = overrides;
+        return {
+            backgroundColor: theme.panel,
+            borderColor: theme.border,
+            borderWidth: 1,
+            titleColor: theme.muted,
+            bodyColor: theme.textPrimary,
+            displayColors: true,
+            boxWidth: 10,
+            boxHeight: 10,
+            boxPadding: 4,
+            titleFont: { family: TOOLTIP_FONT, size: 11, weight: '500' },
+            bodyFont: { family: TOOLTIP_FONT, size: 11, weight: '400' },
+            ...rest,
+            callbacks: {
+                title(items) {
+                    return items.length ? new Date(items[0].parsed.x).toLocaleString() : '';
+                },
+                labelColor(ctx) {
+                    const color = ctx.dataset.borderColor || theme.textPrimary;
+                    return { borderColor: color, backgroundColor: color, borderWidth: 0 };
+                },
+                labelTextColor(ctx) {
+                    return ctx.dataset.borderColor || theme.textPrimary;
+                },
+                ...callbacks,
+            },
+        };
+    }
+
+    function createChart(canvas, { datasets, scales, tooltip, plugins = [] }) {
+        if (typeof Chart === 'undefined') {
+            throw new Error('Chart.js failed to load');
         }
-        if (tile.bar) {
-            return '<div class="metric__bar"><span data-role="bar"></span></div>';
+        return new Chart(canvas.getContext('2d'), {
+            type: 'line',
+            data: { datasets },
+            plugins,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                interaction: { mode: 'nearest', axis: 'x', intersect: false },
+                plugins: {
+                    legend: { display: false },
+                    tooltip,
+                },
+                scales,
+            },
+        });
+    }
+
+    /** Load a history payload into every dataset, keyed by each one's `sampleKey`. */
+    function applySamples(chart, samples) {
+        chart.data.datasets.forEach((dataset) => {
+            dataset.data = samples.map((sample) => ({
+                x: sample.ts * 1000,
+                y: sample[dataset.sampleKey] ?? null,
+            }));
+        });
+
+        // Pin x to the sample span so tick "nice" rounding can't leave empty space on the left.
+        if (samples.length) {
+            chart.options.scales.x.min = samples[0].ts * 1000;
+            chart.options.scales.x.max = samples[samples.length - 1].ts * 1000;
+        } else {
+            delete chart.options.scales.x.min;
+            delete chart.options.scales.x.max;
         }
-        return '';
+
+        chart.update('none');
     }
 
     /**
-     * Build the metric tiles once. Subsequent updates mutate these in place so
-     * values change without tearing down the DOM (no flicker, preserved focus).
+     * Repeating refresh with the failure path already handled, so a rejected
+     * fetch logs and skips rather than killing the interval.
      */
-    function buildTiles(container, tiles) {
-        container.textContent = '';
-        for (const tile of tiles) {
-            const el = document.createElement('div');
-            el.className = 'metric';
-            el.dataset.metric = tile.id;
-            el.innerHTML = `
-                <div class="metric__head">
-                    <svg class="metric__icon" aria-hidden="true"><use href="#icon-${tile.icon}"></use></svg>
-                    <span class="metric__label">${tile.label}</span>
-                </div>
-                <div class="metric__value t-digit-group" data-role="value">—</div>
-                ${tile.sub !== false ? '<div class="metric__sub" data-role="sub"></div>' : ''}
-                ${barHtmlFor(tile)}
-            `;
-            container.appendChild(el);
-        }
+    function createPoller(refresh, label, intervalMs = REFRESH_INTERVAL) {
+        let timer = null;
+        const runOnce = () => refresh().catch((err) => console.error(`${label} refresh failed:`, err));
+        return {
+            refresh: runOnce,
+            start() {
+                this.stop();
+                runOnce();
+                timer = setInterval(runOnce, intervalMs);
+            },
+            stop() {
+                if (timer === null) return;
+                clearInterval(timer);
+                timer = null;
+            },
+        };
     }
 
-    function setBarWidth(el, fill) {
-        if (!el) return;
-        el.style.width = fill == null ? '0%' : `${Math.min(100, fill)}%`;
-    }
-
-    function setBarMarker(el, fill) {
-        if (!el) return;
-        if (fill == null) {
-            el.hidden = true;
-            return;
-        }
-        el.hidden = false;
-        el.style.left = `${Math.min(100, fill)}%`;
-    }
-
-    function revealGrid(container) {
-        window.SMTransitions?.revealSkeleton(container);
-    }
-
-    function setTile(container, id, { value, sub, level, fill, avgFill, maxFill }) {
-        const tile = container.querySelector(`.metric[data-metric="${id}"]`);
-        if (!tile) return;
-        tile.classList.remove('metric--warn', 'metric--crit');
-        if (level) tile.classList.add(level);
-        const valueEl = tile.querySelector('[data-role="value"]');
-        if (window.SMTransitions) {
-            window.SMTransitions.setDigits(valueEl, value);
-        } else {
-            valueEl.textContent = value;
-        }
-        const subEl = tile.querySelector('[data-role="sub"]');
-        if (subEl) subEl.textContent = sub ?? '';
-        setBarWidth(tile.querySelector('[data-role="bar"]'), fill);
-        setBarMarker(tile.querySelector('[data-role="bar-avg"]'), avgFill);
-        setBarMarker(tile.querySelector('[data-role="bar-max"]'), maxFill);
-        // Idempotent: the first tile written after a fetch lands is what
-        // cross-fades the pulsing skeleton out.
-        revealGrid(container);
-    }
-
-    // Only replace the placeholder while no tiles exist; once tiles are built we
-    // keep the last-known values on a transient failure rather than wiping them.
-    function showGridError(container, message) {
-        if (container.querySelector('.metric')) return;
-        container.removeAttribute('aria-busy');
-        const p = container.querySelector('.metric-grid__placeholder') || document.createElement('p');
-        p.className = 'metric-grid__placeholder';
-        p.textContent = message;
-        if (!p.isConnected) container.appendChild(p);
-        revealGrid(container);
-    }
-
-    window.SMMetricGrid = {
-        levelFor,
-        formatValue,
-        buildTiles,
-        setTile,
-        showGridError,
-        revealGrid,
+    window.SMChartUtils = {
+        WINDOWS,
+        ROLLUPS,
+        cssToken,
+        withOpacity,
+        chartTheme,
+        readLocal,
+        writeLocal,
+        createChoiceGroup,
+        bindSeriesToggles,
+        applyHiddenSeries,
+        padCell,
+        formatTooltipValue,
+        timeScale,
+        valueScale,
+        buildTooltip,
+        createChart,
+        applySamples,
+        createPoller,
     };
 })();

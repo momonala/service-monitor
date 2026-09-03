@@ -13,7 +13,6 @@ from src.system_metrics import (
     ServiceCpuTracker,
     ServiceSample,
     SystemSample,
-    average_temperature,
     average_ticks,
     canned_history,
     ensure_schema,
@@ -29,6 +28,7 @@ from src.system_metrics import (
     sample_services,
     service_cpu_percent,
     service_history_payload,
+    temperature_window_stats,
 )
 
 
@@ -275,7 +275,7 @@ def test_metrics_aggregator_flushes_avg_and_max(metrics_db: Path):
     assert history[0].temperature_c_max == 60.0
 
 
-def test_average_temperature_from_db(metrics_db: Path, monkeypatch):
+def test_temperature_window_stats_average_from_db(metrics_db: Path, monkeypatch):
     """24h average is the mean of in-window samples, ignoring nulls."""
     monkeypatch.setattr("src.system_metrics.is_linux", lambda: True)
     now = 1_700_000_000.0
@@ -293,13 +293,12 @@ def test_average_temperature_from_db(metrics_db: Path, monkeypatch):
         db_path=metrics_db,
     )
 
-    assert average_temperature(window="1h", now=now, db_path=metrics_db) == 50.0
+    avg, _ = temperature_window_stats(window="1h", now=now, db_path=metrics_db)
+    assert avg == 50.0
 
 
 def test_temperature_window_stats_uses_stored_max(metrics_db: Path, monkeypatch):
     """Window stats return avg of means and max of stored peaks."""
-    from src.system_metrics import temperature_window_stats
-
     monkeypatch.setattr("src.system_metrics.is_linux", lambda: True)
     now = 1_700_000_000.0
     record_sample(_sample(now - 100, temp=40, temp_max=48), db_path=metrics_db)
@@ -311,15 +310,15 @@ def test_temperature_window_stats_uses_stored_max(metrics_db: Path, monkeypatch)
     assert peak == 72.0
 
 
-def test_average_temperature_empty_window(metrics_db: Path, monkeypatch):
+def test_temperature_window_stats_empty_window(metrics_db: Path, monkeypatch):
     monkeypatch.setattr("src.system_metrics.is_linux", lambda: True)
-    assert average_temperature(window="1h", now=1_700_000_000.0, db_path=metrics_db) is None
+    assert temperature_window_stats(window="1h", now=1_700_000_000.0, db_path=metrics_db) == (None, None)
 
 
-def test_average_temperature_canned_off_linux(monkeypatch):
+def test_temperature_window_stats_canned_off_linux(monkeypatch):
     monkeypatch.setattr("src.system_metrics.is_linux", lambda: False)
-    avg = average_temperature(window="24h", now=1_700_000_000.0)
-    assert avg is not None
+    avg, peak = temperature_window_stats(window="24h", now=1_700_000_000.0)
+    assert avg is not None and peak is not None
     assert 40.0 <= avg <= 60.0
 
 

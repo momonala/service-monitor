@@ -19,8 +19,6 @@
         { id: 'class_b', icon: 'download', label: 'R2 Class B', bar: true },
     ];
 
-    let timer = null;
-
     function formatPct(pct) {
         return pct == null ? '—' : `${pct}%`;
     }
@@ -89,7 +87,7 @@
         const container = document.getElementById('r2Usage');
         if (!section || !container) return;
         refresh(section, container);
-        timer = setInterval(() => refresh(section, container), REFRESH_INTERVAL);
+        setInterval(() => refresh(section, container), REFRESH_INTERVAL);
     }
 
     window.ServiceMonitorR2Usage = { init };

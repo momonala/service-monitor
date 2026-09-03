@@ -9,6 +9,8 @@
 
     const CLOUDFLARE_R2_DASHBOARD_URL = 'https://dash.cloudflare.com/7912d21c50893a42372a2187d0cbdf8b/r2/overview';
 
+    const CI_ICONS = { success: 'check-circle', failure: 'x-circle' };
+
     /** Compact "Nh"/"Nd" age string for the backup badge tooltip. */
     function formatStaleAge(staleSeconds) {
         const hours = staleSeconds / 3600;
@@ -25,26 +27,23 @@
         return svg;
     }
 
+    function metricLevelClass(pct) {
+        if (pct == null) return 'service-metric--empty';
+        if (pct >= METRIC_CRIT_PCT) return 'service-metric--crit';
+        if (pct >= METRIC_WARN_PCT) return 'service-metric--warn';
+        return 'service-metric--ok';
+    }
+
     /**
-     * Build a "[icon] NNN MB N.N%" cell for the sidebar row (the percent is hidden on mobile,
-     * where the column is too narrow to read both). Text color reflects usage
-     * level (ok/warn/crit) instead of a fixed per-metric identity color.
-     * @param {string} className - 'service-mem'
-     * @param {string} icon - icon symbol name
+     * Build the "NNN MB N.N%" memory cell for a sidebar row (the percent is hidden on
+     * mobile, where the column is too narrow to read both). Text color reflects usage
+     * level (ok/warn/crit) rather than a fixed per-metric identity color.
      * @param {number | null} pct
      * @param {number | null} mb
      */
-    function buildMetricCell(className, icon, pct, mb) {
+    function buildMemoryCell(pct, mb) {
         const cell = document.createElement('span');
-        cell.className = `${className} ${
-            pct == null
-                ? 'service-metric--empty'
-                : pct >= METRIC_CRIT_PCT
-                    ? 'service-metric--crit'
-                    : pct >= METRIC_WARN_PCT
-                        ? 'service-metric--warn'
-                        : 'service-metric--ok'
-        }`;
+        cell.className = `service-mem ${metricLevelClass(pct)}`;
         cell.title = 'Click to sort by this column';
 
         const value = document.createElement('span');
@@ -102,10 +101,9 @@
         grid.querySelector('.service-uptime')?.remove();
 
         if (status.ci_status) {
-            const ciIcon = status.ci_status === 'success' ? 'check-circle' : status.ci_status === 'failure' ? 'x-circle' : 'alert-triangle';
-            const ciClass = `service-details__item service-details__item--ci service-details__item--ci-${status.ci_status}`;
+            const ciIcon = CI_ICONS[status.ci_status] ?? 'alert-triangle';
             const ciLink = document.createElement('a');
-            ciLink.className = ciClass;
+            ciLink.className = `service-details__item service-details__item--ci service-details__item--ci-${status.ci_status}`;
             ciLink.href = `https://github.com/momonala/${status.project_group}/actions/workflows/ci.yml`;
             ciLink.target = '_blank';
             ciLink.rel = 'noopener';
@@ -116,7 +114,7 @@
             ciLink.appendChild(ciSvg);
             grid.appendChild(ciLink);
         }
-        grid.appendChild(buildMetricCell('service-mem', 'memory', status.memory_used_pct, status.memory_used_mb));
+        grid.appendChild(buildMemoryCell(status.memory_used_pct, status.memory_used_mb));
 
         const item = document.createElement('span');
         item.className = 'service-uptime';
@@ -190,9 +188,9 @@
         backupLink.href = CLOUDFLARE_R2_DASHBOARD_URL;
         backupLink.target = '_blank';
         backupLink.rel = 'noopener';
-        backupLink.title = status.backup_stale
-            ? `Cloud backup: last known-good backup ${formatStaleAge(status.backup_stale_seconds)} old, source has changed since`
-            : `Cloud backup: last known-good backup ${formatStaleAge(status.backup_stale_seconds)} old`;
+        const age = formatStaleAge(status.backup_stale_seconds);
+        backupLink.title = `Cloud backup: last known-good backup ${age} old`
+            + (status.backup_stale ? ', source has changed since' : '');
         const backupSvg = buildIcon('cloud');
         backupSvg.setAttribute('aria-label', `Backup ${status.backup_status}`);
         backupSvg.removeAttribute('aria-hidden');
@@ -296,8 +294,9 @@
 
         const frequency = settings[serviceName] ?? 'hourly';
 
-        if (control.querySelector('.alert-frequency-select')) {
-            control.querySelector('.alert-frequency-select').value = frequency;
+        const existing = control.querySelector('.alert-frequency-select');
+        if (existing) {
+            existing.value = frequency;
             return;
         }
 
@@ -463,7 +462,14 @@
         }
 
         latestMetricsByName = new Map(
-            services.map((status) => [status.name, { memory_used_pct: status.memory_used_pct, memory_used_mb: status.memory_used_mb, uptime: status.uptime }]),
+            services.map((status) => [
+                status.name,
+                {
+                    memory_used_pct: status.memory_used_pct,
+                    memory_used_mb: status.memory_used_mb,
+                    uptime: status.uptime,
+                },
+            ]),
         );
 
         for (const status of services) {

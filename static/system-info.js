@@ -23,7 +23,6 @@
         { id: 'memory', icon: 'memory', label: 'Memory', bar: true },
     ];
 
-    let timer = null;
     let ipCopyBound = false;
 
     function renderIp(ip) {
@@ -139,10 +138,7 @@
     async function refresh(container) {
         try {
             const res = await fetch('/api/system-info');
-            if (!res.ok) {
-                showGridError(container, `Failed to load system info (HTTP ${res.status}).`);
-                throw new Error(`system-info ${res.status}`);
-            }
+            if (!res.ok) throw new Error(`system-info ${res.status}`);
             render(container, await res.json());
         } catch (err) {
             console.error('System info refresh failed:', err);
@@ -154,7 +150,7 @@
         const container = document.getElementById('systemMetrics');
         if (!container) return;
         refresh(container);
-        timer = setInterval(() => refresh(container), REFRESH_INTERVAL);
+        setInterval(() => refresh(container), REFRESH_INTERVAL);
     }
 
     window.ServiceMonitorSystemInfo = { init };

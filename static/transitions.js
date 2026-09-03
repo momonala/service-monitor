@@ -137,7 +137,7 @@
 
     // ── Tabs sliding (16) ─────────────────────────────────────────────
     // The rollup / lookback segmented controls. The chart modules flip
-    // .is-active via SMChartUtils.syncChoiceGroup; movePill re-measures
+    // .is-active via SMChartUtils.createChoiceGroup; movePill re-measures
     // and CSS tweens the pill between the two positions.
 
     function movePill(bar, animate = true) {

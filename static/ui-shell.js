@@ -32,7 +32,7 @@
         try {
             localStorage.setItem(STORAGE_SIDEBAR_COLLAPSED, String(collapsed));
         } catch {
-            return;
+            // Ignore quota / private-mode failures.
         }
     }
 

@@ -3,8 +3,9 @@ import logging
 import queue
 import subprocess
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, redirect, render_template, request, stream_with_context, url_for
@@ -12,7 +13,8 @@ from requests import RequestException
 
 from src.backup_status import backup_statuses_for_groups
 from src.canned_info import canned_service_statuses, canned_system_info, websites
-from src.r2_usage import fetch_r2_usage_summary
+from src.config import FLASK_PORT
+from src.r2_usage import R2UsageSummary, fetch_r2_usage_summary
 from src.scheduler import (
     DEFAULT_ALERT_FREQUENCY,
     VALID_FREQUENCIES,
@@ -21,6 +23,7 @@ from src.scheduler import (
     start_scheduler,
 )
 from src.services import (
+    ServiceStatus,
     get_info_for_service,
     get_service_health,
     get_service_status,
@@ -36,10 +39,8 @@ from src.system_metrics import (
     history_payload,
     latest_service_sample_payload,
     latest_service_samples_payload,
-    rollup_seconds,
     service_history_payload,
     temperature_window_stats,
-    window_seconds,
 )
 from src.telegram import send_telegram_message
 from src.values import INSPECTOR_DETECTOR_CWD, INSPECTOR_DETECTOR_UV_PATH
@@ -53,16 +54,28 @@ app = Flask(__name__, template_folder=str(_base / "templates"), static_folder=st
 MAX_STATUS_WORKERS = 8
 
 
-def _collect_statuses(services: list[str], detailed: bool) -> list:
+def _collect_statuses(
+    services: list[str], read_status: Callable[[str], ServiceStatus]
+) -> list[ServiceStatus]:
     """Fetch service statuses in parallel while preserving service order."""
     if not services:
         return []
     with ThreadPoolExecutor(max_workers=min(MAX_STATUS_WORKERS, len(services))) as pool:
-        if detailed:
-            return list(
-                pool.map(lambda svc: get_service_status(svc, include_ci=True, status_lines=0), services)
-            )
-        return list(pool.map(get_service_health, services))
+        return list(pool.map(read_status, services))
+
+
+def _collect_detailed_statuses(services: list[str]) -> list[ServiceStatus]:
+    """Full status per service, including CI state, for the sidebar and backup views."""
+    return _collect_statuses(services, lambda svc: get_service_status(svc, include_ci=True, status_lines=0))
+
+
+def _validate_history_params(window: str, rollup: str) -> str | None:
+    """Return an error message for an unusable window/rollup pair, or None when both are valid."""
+    if window not in WINDOWS:
+        return f"window must be one of: {', '.join(WINDOWS)}"
+    if rollup not in ROLLUPS:
+        return f"rollup must be one of: {', '.join(ROLLUPS)}"
+    return None
 
 
 @app.route("/restart", methods=["POST"])
@@ -216,7 +229,7 @@ def sidebar_details():
         return jsonify({"services": []})
 
     services = get_services()
-    detailed_statuses = _collect_statuses(services, detailed=True)
+    detailed_statuses = _collect_detailed_statuses(services)
     latest_metrics = latest_service_samples_payload(services)
     payload = [
         {
@@ -253,7 +266,7 @@ def services_backup_status():
         return jsonify({"services": []})
 
     services = get_services()
-    detailed_statuses = _collect_statuses(services, detailed=True)
+    detailed_statuses = _collect_detailed_statuses(services)
     try:
         backup_by_group = backup_statuses_for_groups(
             sorted({status.project_group for status in detailed_statuses})
@@ -266,7 +279,7 @@ def services_backup_status():
     for status in detailed_statuses:
         # One backup icon per project, not per service — same rule as ci_status (services.py's
         # get_service_status only fetches CI for the suffix-less, non-timer unit).
-        is_primary = status.suffix is None and not status.name.endswith(".timer")
+        is_primary = status.suffix is None and not status.is_timer
         backup = backup_by_group.get(status.project_group) if is_primary else None
         if backup is None:
             continue
@@ -295,16 +308,7 @@ def r2_usage():
         summary = None
 
     if summary is None:
-        return jsonify(
-            {
-                "storage_bytes": None,
-                "storage_pct": None,
-                "class_a_requests": None,
-                "class_a_pct": None,
-                "class_b_requests": None,
-                "class_b_pct": None,
-            }
-        )
+        return jsonify({field.name: None for field in fields(R2UsageSummary)})
     return jsonify(asdict(summary))
 
 
@@ -333,14 +337,9 @@ def system_info_history():
     """Return windowed host vitals time series for the dashboard chart."""
     window = request.args.get("window", DEFAULT_WINDOW)
     rollup = request.args.get("rollup", DEFAULT_ROLLUP)
-    try:
-        window_seconds(window)
-    except ValueError:
-        return jsonify({"error": f"window must be one of: {', '.join(WINDOWS)}"}), 400
-    try:
-        rollup_seconds(rollup)
-    except ValueError:
-        return jsonify({"error": f"rollup must be one of: {', '.join(ROLLUPS)}"}), 400
+    error = _validate_history_params(window, rollup)
+    if error:
+        return jsonify({"error": error}), 400
     try:
         return jsonify(history_payload(window=window, rollup=rollup))
     except Exception:
@@ -378,14 +377,9 @@ def service_history():
         return jsonify({"error": "service is required"}), 400
     if is_linux() and service not in get_services():
         return jsonify({"error": f"unknown service: {service}"}), 400
-    try:
-        window_seconds(window)
-    except ValueError:
-        return jsonify({"error": f"window must be one of: {', '.join(WINDOWS)}"}), 400
-    try:
-        rollup_seconds(rollup)
-    except ValueError:
-        return jsonify({"error": f"rollup must be one of: {', '.join(ROLLUPS)}"}), 400
+    error = _validate_history_params(window, rollup)
+    if error:
+        return jsonify({"error": error}), 400
     try:
         return jsonify(service_history_payload(service, window=window, rollup=rollup))
     except Exception:
@@ -398,7 +392,7 @@ def index():
     service = request.args.get("service")
     if is_linux():
         services = get_services()
-        service_statuses = _collect_statuses(services, detailed=False)
+        service_statuses = _collect_statuses(services, get_service_health)
     else:
         service_statuses = canned_service_statuses
 
@@ -415,9 +409,9 @@ def index():
     )
 
 
-def main():
+def main() -> None:
     start_scheduler()
-    app.run(host="0.0.0.0", port=5001, debug=False)
+    app.run(host="0.0.0.0", port=FLASK_PORT, debug=False)
 
 
 if __name__ == "__main__":

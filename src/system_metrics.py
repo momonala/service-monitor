@@ -4,8 +4,6 @@ On Linux a background sampler polls at 1Hz, then stores one row per 30s window w
 both the average and the max of those ticks for each metric.
 """
 
-from __future__ import annotations
-
 import logging
 import math
 import os
@@ -484,31 +482,33 @@ def _aggregate_bucket(bucket: list[SystemSample], ts: float) -> SystemSample:
     )
 
 
-# Aggregators collapse a bucket of samples (of type T) into one sample stamped at a given ts.
-Aggregator = Callable[[list, float], object]
-
-
-def _downsample(
-    samples: list, max_points: int = MAX_RETURN_POINTS, aggregate: Aggregator = _aggregate_bucket
-) -> list:
+def _downsample[T](
+    samples: list[T],
+    max_points: int = MAX_RETURN_POINTS,
+    aggregate: Callable[[list[T], float], T] = _aggregate_bucket,
+) -> list[T]:
     """Bucket samples by count so chart payloads stay bounded."""
     if len(samples) <= max_points:
         return samples
     bucket_size = math.ceil(len(samples) / max_points)
-    out: list = []
+    out: list[T] = []
     for i in range(0, len(samples), bucket_size):
         bucket = samples[i : i + bucket_size]
         out.append(aggregate(bucket, bucket[len(bucket) // 2].ts))
     return out
 
 
-def _rollup_by_time(samples: list, bucket_seconds: int, aggregate: Aggregator = _aggregate_bucket) -> list:
+def _rollup_by_time[T](
+    samples: list[T],
+    bucket_seconds: int,
+    aggregate: Callable[[list[T], float], T] = _aggregate_bucket,
+) -> list[T]:
     """Aggregate samples into fixed-width time buckets aligned to the Unix epoch."""
     if len(samples) <= 1 or bucket_seconds <= SAMPLE_INTERVAL_SECONDS:
         return samples
 
-    out: list = []
-    bucket: list = []
+    out: list[T] = []
+    bucket: list[T] = []
     bucket_start: float | None = None
 
     for sample in samples:
@@ -706,20 +706,27 @@ def get_latest_service_samples(services: list[str], db_path: Path = DB_PATH) -> 
     }
 
 
+def _total_memory_mb() -> float:
+    """Host RAM in MB, or 0.0 when /proc/meminfo is unreadable."""
+    return (read_total_memory_bytes() or 0) / (1024 * 1024)
+
+
+def _memory_mb(memory_used_pct: float | None, total_mb: float) -> int | None:
+    """Convert a percent-of-host-RAM reading to MB. None when either input is unavailable."""
+    if memory_used_pct is None or not total_mb:
+        return None
+    return round(memory_used_pct / 100 * total_mb)
+
+
 def latest_service_samples_payload(services: list[str], db_path: Path = DB_PATH) -> dict[str, dict]:
     """JSON-ready mapping of service name -> latest CPU/memory reading, for the sidebar rows."""
     samples = get_latest_service_samples(services, db_path=db_path)
-    total_bytes = read_total_memory_bytes() or 0
-    total_mb = total_bytes / (1024 * 1024)
+    total_mb = _total_memory_mb()
     return {
         service: {
             "cpu_percent": sample.cpu_percent,
             "memory_used_pct": sample.memory_used_pct,
-            "memory_used_mb": (
-                round(sample.memory_used_pct / 100 * total_mb)
-                if sample.memory_used_pct is not None and total_mb
-                else None
-            ),
+            "memory_used_mb": _memory_mb(sample.memory_used_pct, total_mb),
         }
         for service, sample in samples.items()
     }
@@ -765,21 +772,13 @@ def service_history_payload(
         if is_linux()
         else canned_service_history(service, window=window, rollup=rollup)
     )
-    total_bytes = read_total_memory_bytes() or 0
-    total_mb = total_bytes / (1024 * 1024)
+    total_mb = _total_memory_mb()
     return {
         "service": service,
         "window": window,
         "rollup": rollup,
         "samples": [
-            {
-                **asdict(sample),
-                "memory_used_mb": (
-                    round(sample.memory_used_pct / 100 * total_mb)
-                    if sample.memory_used_pct is not None and total_mb
-                    else None
-                ),
-            }
+            {**asdict(sample), "memory_used_mb": _memory_mb(sample.memory_used_pct, total_mb)}
             for sample in samples
         ],
     }
@@ -792,16 +791,13 @@ def latest_service_sample_payload(service: str, db_path: Path = DB_PATH) -> dict
     else:
         history = canned_service_history(service, window="1h", rollup="30s")
         sample = history[-1] if history else None
-    total_bytes = read_total_memory_bytes() or 0
-    total_mb = total_bytes / (1024 * 1024)
+    total_mb = _total_memory_mb()
     memory_used_pct = sample.memory_used_pct if sample else None
     return {
         "service": service,
         "cpu_percent": sample.cpu_percent if sample else None,
         "memory_used_pct": memory_used_pct,
-        "memory_used_mb": (
-            round(memory_used_pct / 100 * total_mb) if memory_used_pct is not None and total_mb else None
-        ),
+        "memory_used_mb": _memory_mb(memory_used_pct, total_mb),
         "memory_total_mb": round(total_mb) if total_mb else None,
     }
 
@@ -843,13 +839,3 @@ def temperature_window_stats(
     avg = None if row[0] is None else round(float(row[0]), 1)
     peak = None if row[1] is None else round(float(row[1]), 1)
     return avg, peak
-
-
-def average_temperature(
-    window: str = "24h",
-    now: float | None = None,
-    db_path: Path = DB_PATH,
-) -> float | None:
-    """Mean temperature over the window, or None when no samples are available."""
-    avg, _ = temperature_window_stats(window=window, now=now, db_path=db_path)
-    return avg

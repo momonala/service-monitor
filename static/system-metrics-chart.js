@@ -2,60 +2,44 @@
     'use strict';
 
     const {
-        cssToken, withOpacity, readLocal, writeLocal,
-        setPressed, syncChoiceGroup, padCell, formatTooltipValue, formatXTick,
+        WINDOWS, ROLLUPS, cssToken, withOpacity, readLocal, writeLocal, chartTheme,
+        createChoiceGroup, bindSeriesToggles, applyHiddenSeries,
+        padCell, formatTooltipValue, timeScale, valueScale,
+        buildTooltip, createChart, applySamples, createPoller,
     } = window.SMChartUtils;
 
-    const CHART_REFRESH_INTERVAL = 30000;
     const DEFAULT_WINDOW = '7d';
     const DEFAULT_ROLLUP = '30s';
-    const VALID_WINDOWS = new Set(['1h', '6h', '24h', '7d']);
-    const VALID_ROLLUPS = new Set(['30s', '2m', '10m', '30m']);
     const STORAGE_ROLLUP = 'servicemonitor:system-chart-rollup';
     const SHARED_Y_AXIS = 'y';
-    const TOOLTIP_MONO = "'SF Mono', Monaco, 'Cascadia Code', Consolas, monospace";
     const TOOLTIP_LABEL_W = 10;
     const TOOLTIP_VALUE_W = 6;
 
     // Order here drives toggles, Y-label, datasets, and tooltip rows.
     const SERIES = {
-        cpu: {
-            key: 'cpu_percent',
-            label: 'CPU',
-            displayLabel: 'CPU %',
-            unit: '%',
-            colorVar: '--color-series-cpu',
-        },
-        disk: {
-            key: 'disk_used_pct',
-            label: 'Disk',
-            displayLabel: 'Disk %',
-            unit: '%',
-            colorVar: '--color-series-disk',
-        },
+        cpu: { key: 'cpu_percent', label: 'CPU', displayLabel: 'CPU %', colorVar: '--color-series-cpu' },
+        disk: { key: 'disk_used_pct', label: 'Disk', displayLabel: 'Disk %', colorVar: '--color-series-disk' },
         memory: {
             key: 'memory_used_pct',
             label: 'Memory',
             displayLabel: 'Memory %',
-            unit: '%',
             colorVar: '--color-series-memory',
         },
         temperature: {
             key: 'temperature_c',
             label: 'Temp',
             displayLabel: 'Temp (°C)',
-            unit: '°C',
             colorVar: '--color-series-temp',
         },
     };
     const SERIES_ORDER = Object.keys(SERIES);
 
-    let chartTimer = null;
     let chart = null;
-    let activeWindow = DEFAULT_WINDOW;
-    let activeRollup = DEFAULT_ROLLUP;
     let bootTimeMs = null;
+    let windowGroup = { value: DEFAULT_WINDOW };
+    let rollupGroup = { value: DEFAULT_ROLLUP };
     const visibleSeries = Object.fromEntries(SERIES_ORDER.map((id) => [id, true]));
+    const poller = createPoller(refreshChart, 'System metrics chart');
 
     const rebootLinePlugin = {
         id: 'rebootLine',
@@ -84,32 +68,6 @@
         chart?.update('none');
     }
 
-    function loadRollupState() {
-        const saved = readLocal(STORAGE_ROLLUP);
-        return saved && VALID_ROLLUPS.has(saved) ? saved : DEFAULT_ROLLUP;
-    }
-
-    function seriesColor(series) {
-        return cssToken(series.colorVar);
-    }
-
-    function stopChartPolling() {
-        if (chartTimer == null) return;
-        clearInterval(chartTimer);
-        chartTimer = null;
-    }
-
-    function refreshChartSafely() {
-        return refreshChart().catch((err) => {
-            console.error('System metrics chart refresh failed:', err);
-        });
-    }
-
-    function startChartPolling() {
-        stopChartPolling();
-        chartTimer = setInterval(refreshChartSafely, CHART_REFRESH_INTERVAL);
-    }
-
     function tooltipMetricRow(label, avgValue, maxValue) {
         return [
             padCell(label, TOOLTIP_LABEL_W),
@@ -120,17 +78,14 @@
 
     function maxValueAt(chartInstance, seriesId, dataIndex) {
         const maxDataset = chartInstance.data.datasets.find(
-            (dataset) => (
-                dataset.seriesId === seriesId
-                && dataset.kind === 'max'
-                && !dataset.hidden
-            )
+            (dataset) => dataset.seriesId === seriesId && dataset.kind === 'max' && !dataset.hidden,
         );
         return maxDataset?.data?.[dataIndex]?.y ?? null;
     }
 
     function buildLineDataset(id, series, kind) {
         const isMax = kind === 'max';
+        const color = cssToken(series.colorVar);
         return {
             id: `${id}-${kind}`,
             seriesId: id,
@@ -139,7 +94,7 @@
             label: isMax ? `${series.label} max` : series.label,
             data: [],
             parsing: false,
-            borderColor: isMax ? withOpacity(seriesColor(series), 0.5) : seriesColor(series),
+            borderColor: isMax ? withOpacity(color, 0.5) : color,
             backgroundColor: 'transparent',
             borderDash: isMax ? [4, 4] : [],
             yAxisID: SHARED_Y_AXIS,
@@ -153,134 +108,34 @@
         };
     }
 
-    function buildDatasets() {
-        return SERIES_ORDER.flatMap((id) => {
-            const series = SERIES[id];
-            return [
-                buildLineDataset(id, series, 'avg'),
-                buildLineDataset(id, series, 'max'),
-            ];
-        });
-    }
-
-    function buildScales(muted, border) {
-        return {
-            x: {
-                type: 'linear',
-                bounds: 'data',
-                offset: false,
-                ticks: {
-                    color: muted,
-                    font: { size: 10 },
-                    maxTicksLimit: 6,
-                    callback: (value) => formatXTick(value, activeWindow),
-                },
-                grid: { color: border },
-                border: { color: border },
-            },
-            [SHARED_Y_AXIS]: {
-                type: 'linear',
-                position: 'left',
-                min: 0,
-                max: 100,
-                display: true,
-                ticks: {
-                    color: muted,
-                    font: { size: 10 },
-                    maxTicksLimit: 6,
-                },
-                grid: {
-                    color: border,
-                    drawOnChartArea: true,
-                },
-                border: { color: border },
-            },
-        };
-    }
-
-    function buildTooltip(muted, panel, border, textPrimary) {
-        return {
-            backgroundColor: panel,
-            borderColor: border,
-            borderWidth: 1,
-            titleColor: muted,
-            bodyColor: textPrimary,
-            displayColors: true,
-            boxWidth: 10,
-            boxHeight: 10,
-            boxPadding: 4,
-            titleFont: { family: TOOLTIP_MONO, size: 11, weight: '500' },
-            bodyFont: { family: TOOLTIP_MONO, size: 11, weight: '400' },
-            filter(item) {
-                return item.dataset.kind === 'avg';
-            },
-            itemSort(a, b) {
-                return (
-                    SERIES_ORDER.indexOf(a.dataset.seriesId)
-                    - SERIES_ORDER.indexOf(b.dataset.seriesId)
-                );
-            },
-            callbacks: {
-                title(items) {
-                    if (!items.length) return '';
-                    return new Date(items[0].parsed.x).toLocaleString();
-                },
-                beforeBody() {
-                    return tooltipMetricRow('', 'avg', 'max');
-                },
-                label(ctx) {
-                    const series = SERIES[ctx.dataset.seriesId];
-                    if (ctx.parsed.y == null || !series) return null;
-                    return tooltipMetricRow(
-                        series.displayLabel,
-                        ctx.parsed.y,
-                        maxValueAt(ctx.chart, ctx.dataset.seriesId, ctx.dataIndex),
-                    );
-                },
-                labelColor(ctx) {
-                    const color = ctx.dataset.borderColor || textPrimary;
-                    return {
-                        borderColor: color,
-                        backgroundColor: color,
-                        borderWidth: 0,
-                    };
-                },
-                labelTextColor(ctx) {
-                    return ctx.dataset.borderColor || textPrimary;
-                },
-            },
-        };
-    }
-
-    function buildChart(canvas) {
-        if (typeof Chart === 'undefined') {
-            throw new Error('Chart.js failed to load');
-        }
-
-        const muted = cssToken('--color-text-muted');
-        const panel = cssToken('--color-bg-secondary');
-        const border = cssToken('--border-color');
-        const textPrimary = cssToken('--color-text-primary');
-
-        return new Chart(canvas.getContext('2d'), {
-            type: 'line',
-            data: { datasets: buildDatasets() },
+    function buildChart(canvas, theme) {
+        return createChart(canvas, {
             plugins: [rebootLinePlugin],
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                animation: false,
-                interaction: {
-                    mode: 'nearest',
-                    axis: 'x',
-                    intersect: false,
-                },
-                plugins: {
-                    legend: { display: false },
-                    tooltip: buildTooltip(muted, panel, border, textPrimary),
-                },
-                scales: buildScales(muted, border),
+            datasets: SERIES_ORDER.flatMap((id) => [
+                buildLineDataset(id, SERIES[id], 'avg'),
+                buildLineDataset(id, SERIES[id], 'max'),
+            ]),
+            scales: {
+                x: timeScale(theme, () => windowGroup.value),
+                [SHARED_Y_AXIS]: valueScale(theme, { min: 0, max: 100 }),
             },
+            tooltip: buildTooltip(theme, {
+                filter: (item) => item.dataset.kind === 'avg',
+                itemSort: (a, b) =>
+                    SERIES_ORDER.indexOf(a.dataset.seriesId) - SERIES_ORDER.indexOf(b.dataset.seriesId),
+                callbacks: {
+                    beforeBody: () => tooltipMetricRow('', 'avg', 'max'),
+                    label(ctx) {
+                        const series = SERIES[ctx.dataset.seriesId];
+                        if (ctx.parsed.y == null || !series) return null;
+                        return tooltipMetricRow(
+                            series.displayLabel,
+                            ctx.parsed.y,
+                            maxValueAt(ctx.chart, ctx.dataset.seriesId, ctx.dataIndex),
+                        );
+                    },
+                },
+            }),
         });
     }
 
@@ -305,78 +160,17 @@
 
     function applySeriesVisibility() {
         if (!chart) return;
-        chart.data.datasets.forEach((dataset) => {
-            dataset.hidden = !visibleSeries[dataset.seriesId];
-        });
         syncYLabel();
-        chart.update('none');
+        applyHiddenSeries(chart, visibleSeries);
     }
 
     async function refreshChart() {
         if (!chart) return;
-        const params = new URLSearchParams({
-            window: activeWindow,
-            rollup: activeRollup,
-        });
+        const params = new URLSearchParams({ window: windowGroup.value, rollup: rollupGroup.value });
         const res = await fetch(`/api/system-info/history?${params}`);
         if (!res.ok) throw new Error(`history ${res.status}`);
         const payload = await res.json();
-        const samples = payload.samples || [];
-
-        chart.data.datasets.forEach((dataset) => {
-            dataset.data = samples.map((sample) => ({
-                x: sample.ts * 1000,
-                y: sample[dataset.sampleKey] ?? null,
-            }));
-        });
-
-        // Pin x to the sample span so tick "nice" rounding can't leave empty space on the left.
-        if (samples.length) {
-            chart.options.scales.x.min = samples[0].ts * 1000;
-            chart.options.scales.x.max = samples[samples.length - 1].ts * 1000;
-        } else {
-            delete chart.options.scales.x.min;
-            delete chart.options.scales.x.max;
-        }
-
-        chart.update('none');
-    }
-
-    function bindChartControls(root) {
-        root.querySelectorAll('.system-chart__toggle').forEach((btn) => {
-            btn.addEventListener('click', () => {
-                const id = btn.dataset.series;
-                if (!(id in visibleSeries)) return;
-                visibleSeries[id] = !visibleSeries[id];
-                setPressed(btn, visibleSeries[id]);
-                applySeriesVisibility();
-            });
-        });
-
-        root.querySelectorAll('.system-chart__range').forEach((btn) => {
-            btn.addEventListener('click', () => {
-                const nextWindow = btn.dataset.window;
-                if (!nextWindow || !VALID_WINDOWS.has(nextWindow) || nextWindow === activeWindow) {
-                    return;
-                }
-                activeWindow = nextWindow;
-                syncChoiceGroup(root, '.system-chart__range', 'window', activeWindow);
-                refreshChartSafely();
-            });
-        });
-
-        root.querySelectorAll('.system-chart__rollup').forEach((btn) => {
-            btn.addEventListener('click', () => {
-                const nextRollup = btn.dataset.rollup;
-                if (!nextRollup || !VALID_ROLLUPS.has(nextRollup) || nextRollup === activeRollup) {
-                    return;
-                }
-                activeRollup = nextRollup;
-                writeLocal(STORAGE_ROLLUP, activeRollup);
-                syncChoiceGroup(root, '.system-chart__rollup', 'rollup', activeRollup);
-                refreshChartSafely();
-            });
-        });
+        applySamples(chart, payload.samples || []);
     }
 
     function init() {
@@ -385,19 +179,29 @@
         if (!root || !(canvas instanceof HTMLCanvasElement)) return;
 
         try {
-            chart = buildChart(canvas);
+            chart = buildChart(canvas, chartTheme());
         } catch (err) {
             console.error(err);
             return;
         }
 
-        activeRollup = loadRollupState();
-        syncChoiceGroup(root, '.system-chart__rollup', 'rollup', activeRollup);
-        syncChoiceGroup(root, '.system-chart__range', 'window', activeWindow);
-        bindChartControls(root);
+        const savedRollup = readLocal(STORAGE_ROLLUP);
+        windowGroup = createChoiceGroup(
+            root, '.system-chart__range', 'window', WINDOWS, DEFAULT_WINDOW,
+            () => poller.refresh(),
+        );
+        rollupGroup = createChoiceGroup(
+            root, '.system-chart__rollup', 'rollup', ROLLUPS,
+            ROLLUPS.has(savedRollup) ? savedRollup : DEFAULT_ROLLUP,
+            (rollup) => {
+                writeLocal(STORAGE_ROLLUP, rollup);
+                poller.refresh();
+            },
+        );
+        bindSeriesToggles(root, visibleSeries, applySeriesVisibility);
+
         applySeriesVisibility();
-        refreshChartSafely();
-        startChartPolling();
+        poller.start();
     }
 
     window.ServiceMonitorSystemMetricsChart = { init, setBootTime };
