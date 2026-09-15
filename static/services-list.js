@@ -3,35 +3,77 @@
 
     const AUTO_REFRESH_INTERVAL = 30000;
 
-    // Fixed muted palette for project group borders — consistent and intentional
-    const PROJECT_COLORS = [
-        '#4A9ECC',  // blue
-        '#6AAB7A',  // green
-        '#CC9A4A',  // amber
-        '#9A6ACC',  // purple
-        '#CC6A6A',  // red
-        '#4ACCB8',  // teal
-    ];
+    // Project colors are generated, not hand-picked: the group name hashes to a hue
+    // (stable no matter how the service list changes), rendered in OKLCH so every hue
+    // lands at the same perceived brightness on the dark theme. A repair pass then
+    // walks the sidebar top to bottom and rotates any group whose hue sits within
+    // HUE_MIN_DISTANCE of the group directly above it, so vertical neighbors always
+    // read as distinct colors.
+    const HUE_MIN_DISTANCE = 55;
+    // Rotating by the golden angle escapes a clash in at most a couple of steps
+    // without landing back near an earlier hue.
+    const GOLDEN_ANGLE = 137.508;
+    const PROJECT_COLOR_CHROMA = 0.12;
+    const PROJECT_COLOR_LIGHTNESS = 0.72;
 
     /**
-     * Deterministic color from fixed palette for a project group.
+     * Deterministic hue (0-359) for a project group name.
      * @param {string} projectGroup
-     * @returns {string}
+     * @returns {number}
      */
-    function getProjectColor(projectGroup) {
+    function projectHue(projectGroup) {
         let hash = 0;
         for (let i = 0; i < projectGroup.length; i++) {
             hash = ((hash << 5) - hash) + projectGroup.charCodeAt(i);
             hash |= 0;  // coerce to 32-bit integer
         }
-        return PROJECT_COLORS[Math.abs(hash) % PROJECT_COLORS.length];
+        return Math.abs(hash) % 360;
+    }
+
+    /**
+     * Shortest angular distance between two hues.
+     * @param {number} a
+     * @param {number} b
+     * @returns {number}
+     */
+    function hueDistance(a, b) {
+        const d = Math.abs(a - b) % 360;
+        return d > 180 ? 360 - d : d;
+    }
+
+    /**
+     * Assign each group a hue, nudging any that clash with the group before it.
+     * @param {string[]} orderedNames sidebar groups in display order
+     * @returns {Map<string, number>}
+     */
+    function resolveProjectHues(orderedNames) {
+        const hues = new Map();
+        let prev = null;
+        for (const name of orderedNames) {
+            let hue = projectHue(name);
+            let attempts = 0;
+            while (prev !== null && hueDistance(hue, prev) < HUE_MIN_DISTANCE && attempts++ < 8) {
+                hue = (hue + GOLDEN_ANGLE) % 360;
+            }
+            hues.set(name, hue);
+            prev = hue;
+        }
+        return hues;
     }
 
     function applyProjectColors() {
+        const groups = [...document.querySelectorAll('.project-group')];
+        const hues = resolveProjectHues(groups.map((g) => g.dataset.projectGroup).filter(Boolean));
         document.querySelectorAll('.project-group, .website-pill').forEach((item) => {
             const projectGroup = item.dataset.projectGroup;
             if (!projectGroup) return;
-            item.style.setProperty('--project-color', getProjectColor(projectGroup));
+            // Website pills reuse the sidebar's resolved hue so a project keeps one
+            // color everywhere; a pill with no sidebar group falls back to its raw hue.
+            const hue = hues.has(projectGroup) ? hues.get(projectGroup) : projectHue(projectGroup);
+            item.style.setProperty(
+                '--project-color',
+                `oklch(${PROJECT_COLOR_LIGHTNESS} ${PROJECT_COLOR_CHROMA} ${hue.toFixed(1)})`,
+            );
         });
     }
 

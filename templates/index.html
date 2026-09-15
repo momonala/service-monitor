@@ -29,14 +29,10 @@
     <title>Service Monitor</title>
     <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.ico') }}">
 
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-
     <!-- Critical CSS for instant first paint -->
     <style>
         :root{--color-bg-primary:#000;--color-bg-secondary:#1c1c1e;--color-text-primary:#fff}
-        body{background:var(--color-bg-primary);color:var(--color-text-primary);margin:0;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+        body{background:var(--color-bg-primary);color:var(--color-text-primary);margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
         .app-container{display:flex;min-height:100vh}
         .sidebar{background:#000}
         .hidden{display:none!important}
@@ -350,7 +346,9 @@
                 {% else %}
                 <!-- Dashboard Home View -->
                 <div class="dashboard-home">
-                    <section class="dash-section" aria-label="System metrics">
+                    <h1 class="sr-only">Dashboard</h1>
+                    <section class="dash-section">
+                        <h2 class="sr-only">System metrics</h2>
                         <div id="systemMetrics" class="metric-grid metric-grid--system" aria-busy="true" aria-live="polite">
                             <p class="metric-grid__placeholder">Loading system info…</p>
                         </div>
@@ -376,11 +374,13 @@
                         </div>
                     </section>
 
-                    <section class="dash-section" id="r2UsageSection" aria-label="Cloudflare R2 usage this month" hidden>
+                    <section class="dash-section" id="r2UsageSection" hidden>
+                        <h2 class="sr-only">Cloudflare R2 usage this month</h2>
                         <div id="r2Usage" class="metric-grid metric-grid--r2" aria-busy="true" aria-live="polite"></div>
                     </section>
 
-                    <section class="dash-section" aria-label="Sites">
+                    <section class="dash-section">
+                        <h2 class="sr-only">Sites</h2>
                         <div class="website-pills">
                             {% for website in websites %}
                             <a href="{{ website.url }}"

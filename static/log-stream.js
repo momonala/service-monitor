@@ -16,6 +16,11 @@
     let activeTracebackId = null;
     let tracebackCounter = 0;
 
+    /** Canvas can't reference CSS variables, so resolve theme tokens at draw time. */
+    function cssToken(name) {
+        return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    }
+
     const TRACEBACK_START_RE = /^Traceback \(most recent call last\):/;
     const TRACEBACK_CONNECTOR_RE = /^(During handling of the above exception|The above exception was the direct cause)/;
     const EXCEPTION_LINE_RE = /^[A-Za-z_][\w.]*(?:Error|Exception|Warning|Interrupt|Exit|Timeout|Failure|Abort|Fault)\b|^[A-Za-z_][\w.]*:\s/;
@@ -316,16 +321,18 @@
         const axisY = cssHeight - 16;
         const chartHeight = Math.max(axisY - chartTop, 1);
 
-        ctx.fillStyle = 'rgba(10, 132, 255, 0.16)';
+        ctx.fillStyle = cssToken('--color-accent');
+        ctx.globalAlpha = 0.16;
         ctx.fillRect(0, axisY, cssWidth, 1);
 
-        ctx.fillStyle = 'rgba(10, 132, 255, 0.75)';
+        ctx.globalAlpha = 0.75;
         for (let i = 0; i < LOG_SPIKE_BUCKETS; i++) {
             const height = Math.max(1, (buckets[i] / maxBucket) * chartHeight);
             const x = i * (barWidth + gap);
             const y = axisY - height;
             ctx.fillRect(x, y, barWidth, height);
         }
+        ctx.globalAlpha = 1;
 
         drawXAxisLabels(ctx, cssWidth, axisY, windowStart, windowEnd);
     }
@@ -346,8 +353,8 @@
             { x: width, align: 'right', ts: windowEnd },
         ];
 
-        ctx.fillStyle = 'rgba(161, 161, 166, 0.92)';
-        ctx.font = '10px -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif';
+        ctx.fillStyle = cssToken('--color-text-secondary');
+        ctx.font = '10px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';
         ctx.textBaseline = 'top';
 
         for (const label of labels) {

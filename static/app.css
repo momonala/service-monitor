@@ -25,7 +25,16 @@
     --color-danger-hover:    #ff6259;
 
     /* Borders */
-    --border-color: rgba(255, 255, 255, 0.08);
+    --border-color:        rgba(255, 255, 255, 0.08);
+    --border-color-strong: rgba(255, 255, 255, 0.18);
+
+    /* Neutral fills */
+    --color-bg-inset:        rgba(255, 255, 255, 0.02);
+    --color-hover:           rgba(255, 255, 255, 0.05);
+    --color-hover-strong:    rgba(255, 255, 255, 0.1);
+    --color-active-bg:       rgba(255, 255, 255, 0.08);
+    --color-input-bg:        rgba(118, 118, 128, 0.12);
+    --color-input-bg-strong: rgba(118, 118, 128, 0.18);
 
     /* Layout */
     --sidebar-width:           100vw;
@@ -43,6 +52,7 @@
     --spacing-xl: 2rem;
 
     /* Typography */
+    --font-mono: 'SF Mono', 'Cascadia Code', Monaco, Consolas, monospace;
     --font-size-xs:   0.6875rem;
     --font-size-sm:   0.8125rem;
     --font-size-base: 0.9375rem;
@@ -96,7 +106,7 @@ html {
 body {
     background: var(--color-bg-primary);
     color: var(--color-text-primary);
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     font-size: var(--font-size-base);
     line-height: 1.5;
     min-height: 100vh;
@@ -155,9 +165,10 @@ textarea:focus-visible {
     flex-direction: column;
     overflow-y: auto;
     overflow-x: hidden;
+    /* Mobile drawer floats over the overlay: shadow alone defines the edge.
+       The >=640px block swaps it for a border once the sidebar sits in flow. */
     box-shadow: var(--shadow-lg);
     transition: transform var(--transition-normal);
-    border-right: 1px solid var(--border-color);
 }
 
 .sidebar--closed {
@@ -226,6 +237,13 @@ textarea:focus-visible {
     color: var(--color-accent);
 }
 
+/* display:flex would otherwise override the [hidden] UA rule, leaving bare
+   icons on views that never fetch system info (the service detail pages). */
+.sidebar-ip[hidden],
+.sidebar-reboot[hidden] {
+    display: none;
+}
+
 .sidebar-ip {
     display: flex;
     align-items: center;
@@ -271,7 +289,7 @@ textarea:focus-visible {
 }
 
 .sidebar-ip__value {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     letter-spacing: 0.01em;
     white-space: nowrap;
     overflow: hidden;
@@ -285,12 +303,12 @@ textarea:focus-visible {
     font-family: inherit;
     font-size: var(--font-size-xs);
     color: var(--color-text-secondary);
-    background: rgba(118, 118, 128, 0.18);
+    background: var(--color-input-bg-strong);
     border: 1px solid transparent;
     border-radius: var(--radius);
     cursor: pointer;
-    opacity: 0.6;
-    transition: opacity 0.15s ease, color 0.15s ease;
+    opacity: 0.8;
+    transition: opacity var(--transition-fast), color var(--transition-fast);
 }
 
 .sidebar-ip__copy:hover,
@@ -342,17 +360,17 @@ textarea:focus-visible {
 }
 
 .service-item:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--color-hover);
     color: var(--color-text-primary);
 }
 
 .service-item--active {
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--color-active-bg);
     color: var(--color-text-primary);
 }
 
 .service-item--active:hover {
-    background: rgba(255, 255, 255, 0.09);
+    background: var(--color-hover-strong);
 }
 
 /* single row: [status] [ci] [alert] [backup] [mem%] [name] [time] */
@@ -507,6 +525,7 @@ textarea:focus-visible {
     text-align: center;
     margin-left: 0.5rem;
     font-size: var(--font-size-xs);
+    font-variant-numeric: tabular-nums;
     color: var(--color-text-primary);
     white-space: nowrap;
     cursor: pointer;
@@ -684,11 +703,6 @@ textarea:focus-visible {
         font-size: var(--font-size-xs);
     }
 
-    .service-mem,
-    .service-uptime {
-        font-size: 0.625rem;
-    }
-
     /* The service name is what matters on a phone-width sidebar; the per-service
        share of host RAM is detail that only earns its space on wider screens. */
     .service-metric__pct {
@@ -713,13 +727,13 @@ textarea:focus-visible {
 }
 
 .icon-button:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--color-hover-strong);
     color: var(--color-text-primary);
 }
 
 .icon-button:active {
     transform: scale(0.95);
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--color-active-bg);
 }
 
 .icon-button:focus-visible {
@@ -832,8 +846,6 @@ textarea:focus-visible {
 .btn--danger {
     background: var(--color-danger);
     color: white;
-    box-shadow: 0 1px 4px rgba(255, 69, 58, 0.2);
-    border: 1px solid rgba(255, 69, 58, 0.3);
 }
 
 .btn--danger:hover {
@@ -849,9 +861,7 @@ textarea:focus-visible {
 
 .btn--warning {
     background: var(--color-warning);
-    color: #1a1a1a;
-    box-shadow: 0 1px 4px rgba(255, 214, 10, 0.2);
-    border: 1px solid rgba(255, 214, 10, 0.3);
+    color: var(--color-bg-primary);
 }
 
 .btn--warning:hover {
@@ -872,21 +882,12 @@ textarea:focus-visible {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-xl);
-    animation: fadeIn 0.3s ease-out;
 }
 
 .dash-section {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-md);
-}
-
-.dash-section__title {
-    font-size: var(--font-size-sm);
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    color: var(--color-text-muted);
-    margin: 0 0 var(--spacing-md);
 }
 
 .metric-grid {
@@ -935,14 +936,6 @@ textarea:focus-visible {
 
     .metric-grid .metric__value {
         font-size: var(--font-size-sm);
-    }
-
-    .metric-grid .metric__label {
-        font-size: 0.5625rem;
-    }
-
-    .metric-grid .metric__sub {
-        font-size: 0.5625rem;
     }
 
     .system-chart__y-label {
@@ -1029,7 +1022,6 @@ textarea:focus-visible {
 .metric__label {
     font-size: var(--font-size-xs);
     font-weight: 500;
-    letter-spacing: 0.02em;
 }
 
 .metric__value {
@@ -1178,7 +1170,6 @@ textarea:focus-visible {
     color: var(--color-text-muted);
     font-size: var(--font-size-xs);
     font-weight: 500;
-    letter-spacing: 0.02em;
     white-space: nowrap;
     text-align: right;
 }
@@ -1192,7 +1183,6 @@ textarea:focus-visible {
     color: var(--color-text-muted);
     font-size: var(--font-size-xs);
     font-weight: 500;
-    letter-spacing: 0.02em;
     padding: 0.3rem 0.55rem;
     border-radius: var(--radius);
     cursor: pointer;
@@ -1215,7 +1205,7 @@ textarea:focus-visible {
 .system-chart__range:hover,
 .system-chart__rollup:hover {
     color: var(--color-text-secondary);
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--color-hover);
 }
 
 .system-chart__toggle:focus-visible,
@@ -1234,7 +1224,7 @@ textarea:focus-visible {
 .system-chart__range.is-active,
 .system-chart__rollup.is-active {
     color: var(--color-text-primary);
-    border-color: rgba(255, 255, 255, 0.18);
+    border-color: var(--border-color-strong);
     background: var(--color-bg-secondary);
 }
 
@@ -1267,7 +1257,6 @@ textarea:focus-visible {
     transform: rotate(180deg);
     font-size: var(--font-size-xs);
     font-weight: 500;
-    letter-spacing: 0.04em;
     user-select: none;
 }
 
@@ -1315,7 +1304,7 @@ textarea:focus-visible {
 }
 
 .website-pill:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--color-hover);
     color: var(--color-text-primary);
 }
 
@@ -1378,13 +1367,12 @@ textarea:focus-visible {
     border-radius: var(--radius);
     padding: var(--spacing-panel);
     border: 1px solid var(--border-color);
-    animation: fadeIn 0.3s ease-out;
 }
 
 .service-info {
     white-space: pre-wrap;
     word-wrap: break-word;
-    font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Consolas', monospace;
+    font-family: var(--font-mono);
     font-size: var(--font-size-xs);
     line-height: 1.7;
     color: var(--color-text-secondary);
@@ -1416,11 +1404,6 @@ textarea:focus-visible {
     gap: var(--spacing-md);
     min-height: 0;
     overflow: hidden;
-}
-
-@keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
 }
 
 .btn--loading {
@@ -1466,7 +1449,7 @@ textarea:focus-visible {
     display: flex;
     gap: var(--spacing-md);
     padding: 0.875rem var(--spacing-md);
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--color-bg-inset);
     font-size: var(--font-size-sm);
     flex-shrink: 0;
 }
@@ -1488,7 +1471,7 @@ textarea:focus-visible {
     display: block;
     width: 100%;
     padding: 0.35rem 0.6125rem;
-    background: rgba(118, 118, 128, 0.12);
+    background: var(--color-input-bg);
     border: 1px solid transparent;
     border-radius: var(--radius);
     color: var(--color-text-primary);
@@ -1503,7 +1486,7 @@ textarea:focus-visible {
 }
 
 .sidebar__search input:focus-visible {
-    background: rgba(118, 118, 128, 0.18);
+    background: var(--color-input-bg-strong);
     border-color: var(--color-accent);
 }
 
@@ -1521,7 +1504,6 @@ textarea:focus-visible {
     border-radius: var(--radius);
     border: 1px solid var(--border-color);
     overflow: hidden;
-    animation: fadeIn 0.3s ease-out;
     display: flex;
     flex-direction: column;
     flex: 1;
@@ -1544,7 +1526,7 @@ textarea:focus-visible {
     gap: var(--spacing-sm);
     padding: 0.75rem var(--spacing-panel);
     border-bottom: 1px solid var(--border-color);
-    background: rgba(255, 255, 255, 0.015);
+    background: var(--color-bg-inset);
 }
 
 .log-filter-field {
@@ -1555,7 +1537,7 @@ textarea:focus-visible {
 .log-filter-field select {
     width: 100%;
     padding: 0.28rem 0.44rem;
-    background: rgba(118, 118, 128, 0.12);
+    background: var(--color-input-bg);
     border: 1px solid transparent;
     border-radius: var(--radius);
     color: var(--color-text-primary);
@@ -1631,12 +1613,13 @@ textarea:focus-visible {
     font-family: inherit;
     font-size: var(--font-size-xs);
     color: var(--color-text-secondary);
-    background: rgba(118, 118, 128, 0.18);
+    background: var(--color-input-bg-strong);
     border: 1px solid transparent;
     border-radius: var(--radius);
     cursor: pointer;
-    opacity: 0.45;
-    transition: opacity 0.15s ease, color 0.15s ease;
+    /* Resting state must stay AA-readable on its own — hover only brightens. */
+    opacity: 0.8;
+    transition: opacity var(--transition-fast), color var(--transition-fast);
 }
 
 .log-tb-start:hover .log-copy-btn,
@@ -1652,7 +1635,7 @@ textarea:focus-visible {
 
 .log-chart-panel {
     border-bottom: 1px solid var(--border-color);
-    background: rgba(255, 255, 255, 0.015);
+    background: var(--color-bg-inset);
     padding: 0.4rem var(--spacing-panel) 0.55rem;
 }
 
