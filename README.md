@@ -41,18 +41,19 @@ Assuming IP is `192.168.0.184`
 ---
 
 ## System Updates & Initial Setup
-Run `install/install.sh` to update the system and install dependencies:
+
+Run `scripts/update-upgrade-pi.sh` to update the OS (apt update/upgrade, firmware, install git/bc, install/update uv).
+
+Run `install/install.sh` to install this project:
 
 ```bash
 ./install/install.sh
 ```
 
 This script will:
-- Update package lists and upgrade all packages
-- Install git and bc
-- Remove unused packages and clean up
-- Perform firmware updates
-- Install/update uv (Python package manager)
+- Install/update uv and sync project dependencies
+- Install and enable the systemd unit from `install/`
+- Register the Cloudflared hostname and restart the tunnel
 
 [Update Python version](https://stackoverflow.com/questions/64718274/how-to-update-python-in-raspberry-pi)
 

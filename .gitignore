@@ -95,5 +95,4 @@ alert_settings.json
 .local/
 .ipython/
 .cursor/
-.cursor/
 .claude/

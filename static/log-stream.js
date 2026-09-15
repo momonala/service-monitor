@@ -77,12 +77,6 @@
         return { role: null, id: null };
     }
 
-    /**
-     * Build a child span with a class and text.
-     * @param {string} cls
-     * @param {string} text
-     * @returns {HTMLSpanElement}
-     */
     function makeSpan(cls, text) {
         const el = document.createElement('span');
         if (cls) el.className = cls;
@@ -184,9 +178,6 @@
         return afterStart && beforeEnd;
     }
 
-    /**
-     * Recompute visibility for all log lines based on active filters.
-     */
     function applyLogFilters() {
         const modeEl = document.getElementById('logTimeFilterMode');
         if (!modeEl) return;
@@ -363,11 +354,6 @@
         }
     }
 
-    /**
-     * Format a timestamp for compact, readable x-axis labels.
-     * @param {number} timestamp
-     * @returns {string}
-     */
     function formatAxisLabel(timestamp) {
         const date = new Date(timestamp);
         const timeText = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -435,12 +421,6 @@
         appendFilterTimer = setTimeout(applyLogFilters, 50);
     }
 
-    /**
-     * Whether log list is pinned to the active insertion edge.
-     * @param {HTMLElement} el
-     * @param {boolean} reverse
-     * @returns {boolean}
-     */
     function isPinnedToActiveEdge(el, reverse = reverseDirection) {
         if (reverse) {
             return el.scrollTop < 40;
@@ -448,11 +428,6 @@
         return el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     }
 
-    /**
-     * Scroll log list to insertion edge.
-     * @param {HTMLElement} el
-     * @param {boolean} reverse
-     */
     function scrollToActiveEdge(el, reverse = reverseDirection) {
         if (reverse) {
             el.scrollTop = 0;
@@ -461,10 +436,6 @@
         el.scrollTop = el.scrollHeight;
     }
 
-    /**
-     * Re-render current log DOM order for the selected direction.
-     * @param {HTMLElement} logEl
-     */
     function reorderLogEntries(logEl) {
         const fragment = document.createDocumentFragment();
         const entriesInDisplayOrder = reverseDirection ? [...logEntries].reverse() : logEntries;
@@ -474,9 +445,6 @@
         logEl.appendChild(fragment);
     }
 
-    /**
-     * Sync reverse-direction toggle state with stream rendering behavior.
-     */
     function syncLogDirection() {
         const reverseToggle = document.getElementById('logReverseDirection');
         const logEl = document.getElementById('logStream');

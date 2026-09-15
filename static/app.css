@@ -427,7 +427,7 @@ textarea:focus-visible {
 
 .service-details__item--ci-success { color: var(--color-status-active); }
 .service-details__item--ci-failure { color: var(--color-status-failed); }
-.service-details__item--ci-pending { color: var(--color-warning); }
+.service-details__item--ci-error   { color: var(--color-warning); }
 
 .service-details__item--backup {
     grid-column: 4;

@@ -106,7 +106,7 @@
             ciLink.className = `service-details__item service-details__item--ci service-details__item--ci-${status.ci_status}`;
             ciLink.href = `https://github.com/momonala/${status.project_group}/actions/workflows/ci.yml`;
             ciLink.target = '_blank';
-            ciLink.rel = 'noopener';
+            ciLink.rel = 'noopener noreferrer';
             ciLink.title = 'View CI on GitHub';
             const ciSvg = buildIcon(ciIcon);
             ciSvg.setAttribute('aria-label', `CI ${status.ci_status}`);
@@ -187,7 +187,7 @@
         }`;
         backupLink.href = CLOUDFLARE_R2_DASHBOARD_URL;
         backupLink.target = '_blank';
-        backupLink.rel = 'noopener';
+        backupLink.rel = 'noopener noreferrer';
         const age = formatStaleAge(status.backup_stale_seconds);
         backupLink.title = `Cloud backup: last known-good backup ${age} old`
             + (status.backup_stale ? ', source has changed since' : '');
@@ -435,9 +435,6 @@
         });
     }
 
-    /**
-     * Refresh sidebar details from backend.
-     */
     async function load() {
         const nav = document.querySelector('.sidebar__nav');
         if (!nav) return;
@@ -464,11 +461,7 @@
         latestMetricsByName = new Map(
             services.map((status) => [
                 status.name,
-                {
-                    memory_used_pct: status.memory_used_pct,
-                    memory_used_mb: status.memory_used_mb,
-                    uptime: status.uptime,
-                },
+                { memory_used_pct: status.memory_used_pct, uptime: status.uptime },
             ]),
         );
 

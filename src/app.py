@@ -30,6 +30,7 @@ from src.services import (
     get_services,
     get_system_info,
     is_linux,
+    parse_service_name,
 )
 from src.system_metrics import (
     DEFAULT_ROLLUP,
@@ -265,32 +266,30 @@ def services_backup_status():
     if not is_linux():
         return jsonify({"services": []})
 
-    services = get_services()
-    detailed_statuses = _collect_detailed_statuses(services)
+    # One backup icon per project, attached to the primary unit (suffix-less, non-timer) —
+    # same rule as ci_status. Everything needed here derives from the unit name alone.
+    primary_by_group: dict[str, str] = {}
+    for service in get_services():
+        project_group, suffix = parse_service_name(service)
+        if suffix is None and not service.endswith(".timer"):
+            primary_by_group.setdefault(project_group, service)
+
     try:
-        backup_by_group = backup_statuses_for_groups(
-            sorted({status.project_group for status in detailed_statuses})
-        )
+        backup_by_group = backup_statuses_for_groups(sorted(primary_by_group))
     except Exception:
         logger.exception("Failed to compute backup status")
         backup_by_group = {}
 
-    payload = []
-    for status in detailed_statuses:
-        # One backup icon per project, not per service — same rule as ci_status (services.py's
-        # get_service_status only fetches CI for the suffix-less, non-timer unit).
-        is_primary = status.suffix is None and not status.is_timer
-        backup = backup_by_group.get(status.project_group) if is_primary else None
-        if backup is None:
-            continue
-        payload.append(
-            {
-                "name": status.name,
-                "backup_status": backup.status,
-                "backup_stale_seconds": backup.stale_seconds,
-                "backup_stale": backup.stale,
-            }
-        )
+    payload = [
+        {
+            "name": service,
+            "backup_status": backup.status,
+            "backup_stale_seconds": backup.stale_seconds,
+            "backup_stale": backup.stale,
+        }
+        for group, service in primary_by_group.items()
+        if (backup := backup_by_group.get(group)) is not None
+    ]
     return jsonify({"services": payload})
 
 

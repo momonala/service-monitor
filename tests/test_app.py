@@ -139,38 +139,23 @@ def test_sidebar_details(mock_get_status, mock_get_services, mock_is_linux, mock
     assert "projects" not in payload
 
 
-@patch("src.app.latest_service_samples_payload", return_value={})
 @patch("src.app.backup_statuses_for_groups")
 @patch("src.app.is_linux", return_value=True)
 @patch(
     "src.app.get_services",
-    return_value=["projects_energy-monitor.service", "projects_energy-monitor_mqtt.service"],
+    return_value=[
+        "projects_energy-monitor.service",
+        "projects_energy-monitor_mqtt.service",
+        "projects_energy-monitor_ping.timer",
+    ],
 )
-@patch("src.app.get_service_status")
-def test_sidebar_details_backup_status_only_on_primary_service(
-    mock_get_status, mock_get_services, mock_is_linux, mock_backup_statuses, mock_latest_metrics, client
+def test_backup_status_only_on_primary_service(
+    mock_get_services, mock_is_linux, mock_backup_statuses, client
 ):
-    """A project with a sub-service (e.g. energy-monitor + its mqtt bridge) shows one backup icon,
-    on the primary unit only — same rule as the CI badge — not one per service in the group."""
+    """A project with sub-services (e.g. energy-monitor + its mqtt bridge and a timer) shows one
+    backup icon, on the primary unit only — same rule as the CI badge — not one per service."""
     from src.backup_status import BackupStatus
 
-    def status_for(service, include_ci=True, status_lines=0):
-        is_primary = service == "projects_energy-monitor.service"
-        return ServiceStatus(
-            name=service,
-            is_active=True,
-            is_failed=False,
-            uptime="1 day",
-            memory="100M",
-            cpu="10s",
-            last_error=None,
-            full_status="",
-            project_group="energy-monitor",
-            suffix=None if is_primary else "mqtt",
-            ci_status="success" if is_primary else None,
-        )
-
-    mock_get_status.side_effect = status_for
     mock_backup_statuses.return_value = {
         "energy-monitor": BackupStatus(status="green", stale_seconds=60.0, stale=False, db_count=1)
     }
@@ -178,8 +163,11 @@ def test_sidebar_details_backup_status_only_on_primary_service(
     response = client.get("/api/services/backup-status")
     payload = {s["name"]: s for s in response.get_json()["services"]}
 
+    mock_backup_statuses.assert_called_once_with(["energy-monitor"])
     assert payload["projects_energy-monitor.service"]["backup_status"] == "green"
+    assert payload["projects_energy-monitor.service"]["backup_stale"] is False
     assert "projects_energy-monitor_mqtt.service" not in payload
+    assert "projects_energy-monitor_ping.timer" not in payload
 
 
 @patch("src.app.latest_service_samples_payload")
@@ -436,7 +424,7 @@ def test_service_history_rejects_unknown_service(mock_services, mock_is_linux, c
 
 @patch("src.app.is_linux", return_value=False)
 def test_index_home_omits_dashboard_title(mock_is_linux, client):
-    """Home view no longer shows the Dashboard heading or System meta."""
+    """Home view renders the metrics chart without a visible content header."""
     response = client.get("/")
     assert response.status_code == 200
     html = response.data.decode()

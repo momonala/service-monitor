@@ -45,7 +45,7 @@ flowchart LR
 6. Background scheduler checks health every 5 minutes; failed services send Telegram alerts via `send_service_failure_alert` (rate-limited per service: `hourly` / `daily` / `muted`)
 7. Other apps can POST custom Markdown alerts to `/api/alert` (always sends; no auth)
 8. Dashboard home polls `/api/system-info` every 10s for host vitals (temp, CPU, memory, disk, uptime)
-9. A background sampler (`system_metrics.py`) polls host vitals at 1Hz and, on each 30s flush, also samples per-service RAM/CPU (`systemctl show MemoryCurrent,CPUUsageNSec`). Both are persisted to `system_metrics.db` (7-day retention). The dashboard history chart reads host series from `/api/system-info/history`; the service-detail view reads per-service series from `/api/services/history`
+9. A background sampler (`system_metrics.py`) polls host vitals at 1Hz and, on each 30s flush, also samples per-service RAM/CPU (anonymous memory from each unit's cgroup `memory.stat`, CPU from `systemctl show CPUUsageNSec`). Both are persisted to `data/system_metrics.db` (7-day retention). The dashboard history chart reads host series from `/api/system-info/history`; the service-detail view reads per-service series from `/api/services/history`
 
 ## Prerequisites
 
@@ -62,10 +62,10 @@ flowchart LR
    cd ~/service-monitor
    ```
 
-2. Copy and fill out the env file:
+2. Copy and fill out the secrets module:
    ```bash
-   cp .env.example .env
-   # Edit .env with your credentials
+   cp src/values.py.example src/values.py
+   # Edit src/values.py with your credentials (gitignored)
    ```
 
 3. Run the install script:
@@ -108,7 +108,7 @@ service-monitor/
 │   ├── r2_usage.py     # Cloudflare R2 usage for the current billing month, vs. the free tier
 │   ├── telegram.py     # Shared Telegram transport; service-failure message formatting
 │   ├── canned_info.py  # Static website links + canned ServiceStatus fixtures for dev/testing
-│   ├── values.py       # Loads secrets from .env (python-dotenv)
+│   ├── values.py       # Secrets and host paths (gitignored; copy from values.py.example)
 │   ├── values.py.example # Stub secrets used in CI
 │   └── config.py       # CLI tool that reads pyproject.toml config values
 ├── templates/
@@ -143,26 +143,26 @@ service-monitor/
 │   ├── install.sh
 │   └── projects_service-monitor.service
 ├── alert_settings.json # Persisted per-service alert frequencies (created at runtime)
-├── system_metrics.db   # SQLite time series for host + per-service metrics (created at runtime)
-├── .env.example        # Template for required environment variables
+├── data/
+│   └── system_metrics.db # SQLite time series for host + per-service metrics (created at runtime)
 ├── pyproject.toml
 └── cloudflared/
     └── config.yml
 ```
 
-## Environment Variables
+## Secrets
 
-Copy `.env.example` to `.env` and fill in values:
+Secrets and host paths live in `src/values.py` (gitignored). Copy `src/values.py.example` and fill in:
 
-| Variable | Required | Description |
+| Constant | Required | Description |
 |---|---|---|
-| `TELEGRAM_API_TOKEN` | Yes | Telegram bot token for failure + custom alerts |
-| `TELEGRAM_CHAT_ID` | Yes | Telegram chat ID to send alerts to |
-| `GITHUB_TOKEN` | No | GitHub PAT for CI status; unauthenticated rate limit applies if omitted |
-| `INSPECTOR_DETECTOR_UV_PATH` | No | Path to `uv` binary on Pi (default: `/home/mnalavadi/.local/bin/uv`) |
-| `INSPECTOR_DETECTOR_CWD` | No | Working directory for inspector-detector check (default: `/home/mnalavadi/inspector_detector`) |
-| `CLOUDFLARE_ACCOUNT_ID` | No | Cloudflare account ID for R2 usage reporting; `/api/r2-usage` returns nulls if omitted |
-| `CLOUDFLARE_API_TOKEN` | No | Cloudflare API token for R2 usage reporting; `/api/r2-usage` returns nulls if omitted |
+| `telegram_api_token` | Yes | Telegram bot token for failure + custom alerts |
+| `telegram_chat_id` | Yes | Telegram chat ID to send alerts to |
+| `GITHUB_TOKEN` | No | GitHub PAT for CI status; unauthenticated rate limit applies if empty |
+| `INSPECTOR_DETECTOR_UV_PATH` | No | Path to `uv` binary on the Pi |
+| `INSPECTOR_DETECTOR_CWD` | No | Working directory for the inspector-detector check |
+| `CLOUDFLARE_ACCOUNT_ID` | No | Cloudflare account ID for R2 usage reporting; `/api/r2-usage` returns nulls if empty |
+| `CLOUDFLARE_API_TOKEN` | No | Cloudflare API token for R2 usage reporting; `/api/r2-usage` returns nulls if empty |
 
 ## API Endpoints
 
@@ -173,7 +173,7 @@ Copy `.env.example` to `.env` and fill in values:
 | `/restart` | POST | Restart a service (validated against known services) |
 | `/logs/stream` | GET (SSE) | Server-sent events stream of journalctl output for a service |
 | `/api/services/sidebar-details` | GET | JSON: enriched status + CI for all services (loaded async after first paint) |
-| `/api/services/backup-status` | GET | JSON: per-project cloud-backup freshness (`green`/`yellow`/`red`), loaded separately since it costs an R2 round-trip per project |
+| `/api/services/backup-status` | GET | JSON: per-project cloud-backup status (`green`/`red` + stale flag), loaded separately since it costs an R2 round-trip per project |
 | `/api/r2-usage` | GET | JSON: this month's Cloudflare R2 usage vs. the free tier; nulls if no Cloudflare token configured |
 | `/api/system-info` | GET | JSON: host (Pi) vitals — temperature, CPU, memory, disk, uptime |
 | `/api/system-info/history` | GET | JSON: windowed host vitals time series for the dashboard chart (`window`, `rollup` params) |
@@ -212,23 +212,25 @@ Returns:
       "name": "projects_foo.service",
       "is_active": true,
       "is_failed": false,
-      "uptime": "2d 3h",
-      "memory": "123.4M",
-      "cpu": "2min 15s",
+      "uptime": "2d",
       "last_error": null,
       "ci_status": "success",
+      "project_group": "foo",
       "cpu_percent": 4.2,
-      "memory_used_pct": 8.5
+      "memory_used_pct": 8.5,
+      "memory_used_mb": 330
     }
   ]
 }
 ```
 
-`cpu_percent`/`memory_used_pct` are each service's most recent sample from `system_metrics.db` (same
-source as `/api/services/history`), fetched for all services in one batched query
-(`latest_service_samples_payload`); `null` when a service has no recorded samples yet. The sidebar row
-renders memory as `NNN MB N.N%` (the percent is dropped under 640px, where the column is too narrow for
-both), hidden along with the rest of the row's detail columns when the sidebar is collapsed.
+`cpu_percent`/`memory_used_pct`/`memory_used_mb` are each service's most recent sample from
+`data/system_metrics.db` (same source as `/api/services/history`), fetched for all services in one
+batched query (`latest_service_samples_payload`); `null` when a service has no recorded samples yet,
+or when the unit is not active (a stopped oneshot/backup service would otherwise keep showing its
+last-run reading forever). The sidebar row renders memory as `NNN MB N.N%` (the percent is dropped
+under 640px, where the column is too narrow for both), hidden along with the rest of the row's detail
+columns when the sidebar is collapsed.
 
 ### GET `/api/services/backup-status`
 
@@ -236,13 +238,19 @@ Returns:
 ```json
 {
   "services": [
-    {"name": "projects_foo.service", "backup_status": "green", "backup_stale_seconds": 1200}
+    {
+      "name": "projects_foo.service",
+      "backup_status": "green",
+      "backup_stale_seconds": 1200,
+      "backup_stale": false
+    }
   ]
 }
 ```
 One entry per project (not per service — same suffix-less rule as `ci_status`), read via `backup_status.py`
-from the manifest/R2 state written by `~/backup-db-cloudflare-r2/backup.sh`. `backup_status` is
-`green`/`yellow`/`red`; a project is omitted if it owns no tracked databases.
+from the manifest/R2 state written by `~/backup-db-cloudflare-r2/backup.sh`. `backup_status` is `green`
+(last uploaded backup is intact in R2) or `red` (missing/corrupted); `backup_stale` flags that the local
+source has changed since that backup was taken. A project is omitted if it owns no tracked databases.
 
 ### GET `/api/r2-usage`
 
@@ -268,10 +276,13 @@ off-Pi); in dev mode the route returns `canned_system_info`.
 ```json
 {
   "hostname": "raspberrypi",
-  "uptime": "6d 14h",
+  "local_ip": "192.168.1.42",
+  "uptime": "6d",
+  "boot_time": "2026-09-09T09:12:00",
   "temperature_c": 52.6,
+  "temperature_avg_24h": 51.2,
+  "temperature_max_24h": 58.4,
   "cpu_percent": 12.4,
-  "load_avg": 0.42,
   "cpu_count": 4,
   "memory_used_mb": 1840,
   "memory_total_mb": 3886,
@@ -283,12 +294,13 @@ off-Pi); in dev mode the route returns `canned_system_info`.
 ```
 
 Sources: `temperature_c` from `/sys/class/thermal/thermal_zone0/temp`; `cpu_percent` sampled over
-~100ms from `/proc/stat`; `memory_*` from `/proc/meminfo`; `uptime` from `/proc/uptime`;
-`load_avg`/`cpu_count` and `disk_*` via stdlib (`os`, `shutil`), so they populate cross-platform.
+~100ms from `/proc/stat`; `memory_*` from `/proc/meminfo`; `uptime`/`boot_time` from `/proc/uptime`;
+`temperature_avg_24h`/`temperature_max_24h` from the stored metrics history; `cpu_count`, `disk_*`,
+and `local_ip` via stdlib (`os`, `shutil`, `socket`), so they populate cross-platform.
 
 ### GET `/api/system-info/history`
 
-Windowed host vitals time series for the dashboard-home chart. Read from `system_metrics.db`
+Windowed host vitals time series for the dashboard-home chart. Read from `data/system_metrics.db`
 (the `system_samples` table). Off-Pi the route returns a synthetic `canned_history`.
 
 - `window`: `1h` | `6h` | `24h` | `7d` (default `7d`). `400` for other values.
@@ -319,16 +331,19 @@ and the live logs). Read from the `service_samples` table. Off-Pi the route retu
   "window": "24h",
   "rollup": "2m",
   "samples": [
-    {"ts": 1720000000.0, "service": "projects_foo.service", "memory_used_pct": 6.1, "cpu_percent": 3.2}
+    {"ts": 1720000000.0, "service": "projects_foo.service", "memory_used_pct": 6.1,
+     "memory_used_mb": 237, "cpu_percent": 3.2}
   ]
 }
 ```
 
-Both values are a percent of the whole host, so they share one 0-100 axis in the chart.
-`memory_used_pct` is `MemoryCurrent` (cgroup RSS) over `MemTotal`; `cpu_percent` is the `CPUUsageNSec`
-delta over the sample interval, normalized by core count (100% = every core saturated).
+Both stored values are a percent of the whole host (`memory_used_mb` is derived from the percent at
+read time); the chart auto-scales its shared axis from 0 since a single service usually sits in the
+low single digits. `memory_used_pct` is the cgroup's anonymous memory over `MemTotal`; `cpu_percent`
+is the `CPUUsageNSec` delta over the sample interval, normalized by core count (100% = every core
+saturated).
 `cpu_percent` is `null` on a service's first sample (no prior counter to diff) and after a restart
-(counter reset). `memory_used_pct` is `null` when systemd reports `MemoryCurrent` as `[not set]`,
+(counter reset). `memory_used_pct` is `null` when the unit's cgroup memory stats are unavailable,
 which happens when the kernel's memory cgroup controller is disabled — on Raspberry Pi OS that needs
 `cgroup_enable=memory cgroup_memory=1` in `/boot/firmware/cmdline.txt`.
 
@@ -382,7 +397,7 @@ starting at `ALERT_RESET_HOUR`, default 6 AM).
 | `projects_*` | Naming convention for monitored services; only services matching this pattern are displayed |
 | `ServiceStatus` | Dataclass holding parsed service info: name, is_active, is_failed, uptime, memory, cpu, last_error, ci_status |
 | Status indicators | Green = active (running), Red = failed, Gray = inactive |
-| Mobile sidebar row | Under 640px the row's four status icons (unit, CI, alert bell, cloud backup) collapse to one rollup glyph: red X if the unit failed, CI failed, or the backup is red; gray pause if the unit is merely stopped; green check otherwise. A stale-backup dot or pending CI counts as green. Rendered server-side from unit+CI state, refreshed by `sidebar-details.js` once backup status arrives |
+| Mobile sidebar row | Under 640px the row's four status icons (unit, CI, alert bell, cloud backup) collapse to one rollup glyph: red X if the unit failed, CI failed, or the backup is red; gray pause if the unit is merely stopped; green check otherwise. A stale-backup dot or a CI badge in the error state counts as green. Rendered server-side from unit+CI state, refreshed by `sidebar-details.js` once backup status arrives |
 | Sidebar collapse | The collapse toggle is available from 640px up (tablet included); state persists in `localStorage` under `servicemonitor:sidebar-collapsed`. Below 640px the sidebar is a drawer driven by the hamburger instead |
 | Project groups | Services sharing the same base name (e.g. `projects_energy-monitor_*`) are visually grouped in the sidebar |
 | CI status | Fetched from GitHub Actions API for services without a suffix; cached 60s per repo |
@@ -407,7 +422,7 @@ ServiceStatus
 └── ci_status: str | None  # "success" | "failure" | "error" | None
 ```
 
-Metric time series persisted in `system_metrics.db` (SQLite, 7-day retention, pruned on each write):
+Metric time series persisted in `data/system_metrics.db` (SQLite, 7-day retention, pruned on each write):
 
 ```
 system_samples  (host vitals, one row per 30s window; avg + max of the 1Hz ticks)
@@ -417,14 +432,14 @@ system_samples  (host vitals, one row per 30s window; avg + max of the 1Hz ticks
 
 service_samples  (per-service vitals, one row per service per 30s window)
 ├── (ts REAL, service TEXT)   PRIMARY KEY
-├── memory_used_pct  REAL   # MemoryCurrent (cgroup RSS) / MemTotal; null when the memory cgroup is off
+├── memory_used_pct  REAL   # cgroup anonymous memory / MemTotal; null when the memory cgroup is off
 └── cpu_percent      REAL   # CPUUsageNSec delta / interval / core count; null on first sample or after restart
 ```
 
 ## Storage / Persistence
 
 - Live service state (status, CI) is read from systemd, not stored.
-- Metric time series (host + per-service RAM/CPU) persisted in `system_metrics.db` (see Data Models); 7-day retention.
+- Metric time series (host + per-service RAM/CPU) persisted in `data/system_metrics.db` (see Data Models); 7-day retention.
 - Service list cached in-process for 5 seconds.
 - CI status cached in-process for 60 seconds per repo.
 - Alert frequencies persisted in `alert_settings.json` (written on change).
@@ -437,7 +452,7 @@ service_samples  (per-service vitals, one row per service per 30s window)
 |---|---|---|---|
 | `host` | `src/app.py` | `0.0.0.0` | Bind address |
 | `flask_port` | `pyproject.toml` `[tool.config]` | `5001` | HTTP port |
-| `service_pattern` | `src/services.py` | `projects_*` | systemctl filter pattern |
+| Unit filter pattern | `src/services.py` (`_list_systemd_units`) | `projects_*` | Which systemd units are monitored |
 | `DEFAULT_ALERT_FREQUENCY` | `src/scheduler.py` | `hourly` | Default frequency when a service has no saved setting |
 | `ALERT_RESET_HOUR` | `src/scheduler.py` | `6` | Hour (local time) at which the daily alert window resets |
 | Health-check interval | `src/scheduler.py` | 5 minutes | How often failed services are scanned for Telegram alerts |
@@ -448,6 +463,7 @@ service_samples  (per-service vitals, one row per service per 30s window)
 |---|---|---|
 | systemd | Service management | Local system |
 | Cloudflared | HTTPS tunnel | Cloudflare account |
-| Telegram Bot API | Failure + custom alerts | Bot token in `.env` |
-| GitHub Actions API | CI status badges | PAT in `.env` (optional) |
-| Cloudflare R2 API | Backup status + usage reporting | Account ID + API token in `.env` (optional) |
+| Telegram Bot API | Failure + custom alerts | Bot token in `src/values.py` |
+| GitHub Actions API | CI status badges | PAT in `src/values.py` (optional) |
+| Cloudflare R2 API | Usage reporting | Account ID + API token in `src/values.py` (optional) |
+| rclone (`r2:` remote) | Cloud-backup freshness checks | rclone config on the Pi (optional) |
