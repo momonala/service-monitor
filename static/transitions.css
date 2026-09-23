@@ -119,7 +119,7 @@
   --tt-delay: 80ms;
   --tt-in-ease: ease-out;
   --tt-out-ease: ease-out;
-  --tt-bg: var(--color-bg-primary);
+  --tt-bg: var(--color-bg-secondary);
   --tt-fg: var(--color-text-primary);
   /* Accordion expand */
   --acc-expand: 250ms;
@@ -598,21 +598,17 @@
 .toast {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--spacing-sm);
     max-width: min(24rem, calc(100vw - 2 * var(--spacing-md)));
-    padding: 0.6rem 0.85rem;
+    padding: var(--spacing-sm) var(--spacing-md);
     background: var(--color-bg-secondary);
-    border: 1px solid var(--border-color);
-    border-left: 3px solid var(--color-accent);
+    /* Border only: a shadow doesn't read on the black page. */
+    border: 1px solid var(--border-color-strong);
     border-radius: var(--radius);
     color: var(--color-text-primary);
     font-size: var(--font-size-sm);
-    box-shadow: var(--shadow-lg);
     pointer-events: auto;
 }
-
-.toast--success { border-left-color: var(--color-status-active); }
-.toast--error   { border-left-color: var(--color-danger); }
 
 .toast__icon {
     width: 1rem;
@@ -838,9 +834,8 @@
     transform-origin: 0 50%;
     padding: var(--spacing-xs) var(--spacing-sm);
     border-radius: var(--radius);
-    font-size: var(--font-size-sm);
-    box-shadow: var(--shadow-md);
-    z-index: 50;
+    /* The border from app.css defines the edge; drop the snippet's ring + halo. */
+    box-shadow: none;
 }
 
 .sidebar--collapsed .service-item:hover .service-tooltip.t-tt,
@@ -870,9 +865,9 @@
     width: 0.85rem;
     height: 0.85rem;
     flex-shrink: 0;
-    border-radius: 2px;
+    border-radius: var(--radius);
     background: transparent;
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+    box-shadow: inset 0 0 0 1px var(--color-control-edge);
 }
 
 .t-check[aria-checked="true"] {

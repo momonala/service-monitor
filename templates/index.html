@@ -1,6 +1,6 @@
 {% macro chart_scale_controls(prefix, active_rollup, active_window) %}
 <div class="system-chart__filter">
-    <span class="system-chart__filter-label" id="{{ prefix }}WindowSizeLabel">rollup</span>
+    <span class="system-chart__filter-label" id="{{ prefix }}WindowSizeLabel">Rollup</span>
     <div class="system-chart__rollups" role="group" aria-labelledby="{{ prefix }}WindowSizeLabel">
         {% for rollup in ['30s', '2m', '10m', '30m'] %}
         <button type="button" class="system-chart__rollup{{ ' is-active' if rollup == active_rollup }}"
@@ -9,7 +9,7 @@
     </div>
 </div>
 <div class="system-chart__filter">
-    <span class="system-chart__filter-label" id="{{ prefix }}LookbackLabel">lookback</span>
+    <span class="system-chart__filter-label" id="{{ prefix }}LookbackLabel">Lookback</span>
     <div class="system-chart__ranges" role="group" aria-labelledby="{{ prefix }}LookbackLabel">
         {% for window in ['1h', '6h', '24h', '7d'] %}
         <button type="button" class="system-chart__range{{ ' is-active' if window == active_window }}"
@@ -142,7 +142,7 @@
             <div class="sidebar-ip" id="sidebarIp" hidden>
                 <svg class="sidebar-ip__icon" aria-hidden="true"><use href="#icon-wifi"></use></svg>
                 <span class="sidebar-ip__value" id="sidebarIpValue"></span>
-                <button type="button" class="sidebar-ip__copy" id="sidebarIpCopy" title="Copy IP address">copy</button>
+                <button type="button" class="sidebar-ip__copy" id="sidebarIpCopy" title="Copy IP address">Copy</button>
             </div>
 
             <!-- Last reboot -->
@@ -169,7 +169,7 @@
 
             <!-- Search Services -->
             <div class="sidebar__search">
-                <input type="text" id="serviceSearch" placeholder="Search services..." aria-label="Search services">
+                <input type="text" id="serviceSearch" placeholder="Search services…" aria-label="Search services">
             </div>
 
             <nav class="sidebar__nav">
@@ -281,7 +281,7 @@
                         <div class="t-acc-panel-inner">
                         <div class="system-chart__toolbar">
                             <div class="system-chart__filter">
-                                <span class="system-chart__filter-label" id="serviceChartMetricsLabel">metrics</span>
+                                <span class="system-chart__filter-label" id="serviceChartMetricsLabel">Metrics</span>
                                 <div class="system-chart__series" role="group" aria-labelledby="serviceChartMetricsLabel">
                                     <button type="button" class="system-chart__toggle is-active" data-series="cpu" aria-pressed="true">CPU</button>
                                     <button type="button" class="system-chart__toggle is-active" data-series="memory" aria-pressed="true">Memory</button>
@@ -329,8 +329,8 @@
                         </label>
                         <div class="log-filter-toggles">
                             <label class="log-filter-checkbox">
-                                <input id="logCaseSensitive" type="checkbox">
-                                <span>Aa</span>
+                                <input id="logCaseSensitive" type="checkbox" aria-label="Case sensitive">
+                                <span title="Case sensitive" aria-hidden="true">Aa</span>
                             </label>
                             <label class="log-filter-checkbox">
                                 <input id="logReverseDirection" type="checkbox">
@@ -356,7 +356,7 @@
                             <div class="system-chart__body" id="systemChartBody">
                                 <div class="system-chart__toolbar">
                                     <div class="system-chart__filter">
-                                        <span class="system-chart__filter-label" id="systemChartMetricsLabel">metrics</span>
+                                        <span class="system-chart__filter-label" id="systemChartMetricsLabel">Metrics</span>
                                         <div class="system-chart__series" role="group" aria-labelledby="systemChartMetricsLabel">
                                             <button type="button" class="system-chart__toggle is-active" data-series="cpu" aria-pressed="true">CPU</button>
                                             <button type="button" class="system-chart__toggle is-active" data-series="disk" aria-pressed="true">Disk</button>

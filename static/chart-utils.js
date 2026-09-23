@@ -7,8 +7,7 @@
     const REFRESH_INTERVAL = 30000;
     const WINDOWS = new Set(['1h', '6h', '24h', '7d']);
     const ROLLUPS = new Set(['30s', '2m', '10m', '30m']);
-    const TOOLTIP_FONT = "'SF Mono', Monaco, 'Cascadia Code', Consolas, monospace";
-    const AXIS_FONT_SIZE = 10;
+    const AXIS_FONT_SIZE = 11;
     const AXIS_MAX_TICKS = 6;
 
     function cssToken(name) {
@@ -31,6 +30,7 @@
             panel: cssToken('--color-bg-secondary'),
             border: cssToken('--border-color'),
             textPrimary: cssToken('--color-text-primary'),
+            mono: cssToken('--font-mono'),
         };
     }
 
@@ -170,8 +170,8 @@
             boxWidth: 10,
             boxHeight: 10,
             boxPadding: 4,
-            titleFont: { family: TOOLTIP_FONT, size: 11, weight: '500' },
-            bodyFont: { family: TOOLTIP_FONT, size: 11, weight: '400' },
+            titleFont: { family: theme.mono, size: 11, weight: '500' },
+            bodyFont: { family: theme.mono, size: 11, weight: '400' },
             ...rest,
             callbacks: {
                 title(items) {

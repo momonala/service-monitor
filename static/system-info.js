@@ -42,8 +42,8 @@
             ipCopyBound = true;
             copyBtn.addEventListener('click', () => {
                 navigator.clipboard?.writeText(value.textContent).then(() => {
-                    copyBtn.textContent = 'copied';
-                    setTimeout(() => { copyBtn.textContent = 'copy'; }, 1200);
+                    copyBtn.textContent = 'Copied';
+                    setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1200);
                 });
             });
         }

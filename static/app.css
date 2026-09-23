@@ -10,7 +10,7 @@
     /* Text */
     --color-text-primary:   #ffffff;
     --color-text-secondary: rgba(161, 161, 166, 0.95);
-    --color-text-muted:     rgba(142, 142, 147, 0.9);
+    --color-text-muted:     #8e8e93;
 
     /* Status / semantic */
     --color-status-active:   #32d74b;
@@ -23,6 +23,9 @@
     --color-accent-hover:    #409cff;
     --color-danger:          #ff453a;
     --color-danger-hover:    #ff6259;
+    --color-on-danger:       #ffffff;
+    --color-danger-tint:     rgba(255, 69, 58, 0.04);
+    --color-danger-edge:     rgba(255, 69, 58, 0.5);
 
     /* Borders */
     --border-color:        rgba(255, 255, 255, 0.08);
@@ -35,6 +38,9 @@
     --color-active-bg:       rgba(255, 255, 255, 0.08);
     --color-input-bg:        rgba(118, 118, 128, 0.12);
     --color-input-bg-strong: rgba(118, 118, 128, 0.18);
+    --color-control-edge:    rgba(255, 255, 255, 0.25);
+    --color-project-fallback: rgba(255, 255, 255, 0.15);
+    --color-scrim:           rgba(0, 0, 0, 0.7);
 
     /* Layout */
     --sidebar-width:           100vw;
@@ -67,7 +73,6 @@
     --transition-normal: 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 
     /* Shadows */
-    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.15), 0 2px 4px rgba(0, 0, 0, 0.12);
     --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.2), 0 4px 8px rgba(0, 0, 0, 0.15);
 
     /* Scrollbar */
@@ -265,8 +270,8 @@ textarea:focus-visible {
 }
 
 .sidebar-reboot__icon {
-    width: 14px;
-    height: 14px;
+    width: var(--status-icon-size);
+    height: var(--status-icon-size);
     flex-shrink: 0;
     color: var(--color-text-muted);
 }
@@ -282,8 +287,8 @@ textarea:focus-visible {
 }
 
 .sidebar-ip__icon {
-    width: 14px;
-    height: 14px;
+    width: var(--status-icon-size);
+    height: var(--status-icon-size);
     flex-shrink: 0;
     color: var(--color-text-muted);
 }
@@ -332,7 +337,7 @@ textarea:focus-visible {
 }
 
 .project-group {
-    border-left: 3px solid var(--project-color, rgba(255, 255, 255, 0.15));
+    border-left: 3px solid var(--project-color, var(--color-project-fallback));
     margin-bottom: 0.25rem;
 }
 
@@ -621,15 +626,15 @@ textarea:focus-visible {
     left: calc(var(--sidebar-collapsed-width) + var(--spacing-xs));
     top: 50%;
     transform: translateY(-50%);
-    background: var(--color-bg-primary);
+    background: var(--color-bg-secondary);
     color: var(--color-text-primary);
     padding: var(--spacing-xs) var(--spacing-sm);
+    border: 1px solid var(--border-color-strong);
     border-radius: var(--radius);
     font-size: var(--font-size-sm);
     white-space: nowrap;
     z-index: 50;
     pointer-events: none;
-    box-shadow: var(--shadow-md);
 }
 
 .mobile-nav-bar {
@@ -845,7 +850,7 @@ textarea:focus-visible {
 
 .btn--danger {
     background: var(--color-danger);
-    color: white;
+    color: var(--color-on-danger);
 }
 
 .btn--danger:hover {
@@ -1050,14 +1055,21 @@ textarea:focus-visible {
 
 .metric__bar > span {
     display: block;
+    width: 100%;
     height: 100%;
-    width: 0;
     background: var(--color-metric-fill);
-    transition: width var(--transition-normal), background-color var(--transition-fast);
+    transform-origin: left center;
+    transform: scaleX(0);
+    transition: transform var(--transition-normal), background-color var(--transition-fast);
 }
 
 .metric__bar--dual {
     position: relative;
+}
+
+/* display:block above would otherwise beat the UA [hidden] rule. */
+.metric__bar > span[hidden] {
+    display: none;
 }
 
 .metric__bar--dual > span {
@@ -1066,12 +1078,28 @@ textarea:focus-visible {
     top: 0;
 }
 
-.metric__bar-avg {
+/* Markers span the full track so translateX(N%) lands at N% of the bar; the
+   visible 2px line is the ::before, centered on the span's left edge. */
+.metric__bar > .metric__bar-avg,
+.metric__bar > .metric__bar-max {
+    width: 100%;
+    background: none;
+    transform: translateX(0);
+}
+
+.metric__bar-avg::before,
+.metric__bar-max::before {
+    content: '';
+    position: absolute;
+    left: -1px;
     width: 2px;
-    background: var(--color-warning);
+    height: 100%;
+    background: var(--marker-color);
+}
+
+.metric__bar-avg {
+    --marker-color: var(--color-warning);
     z-index: 3;
-    transform: translateX(-50%);
-    transition: left var(--transition-normal);
 }
 
 .metric__bar-current {
@@ -1079,12 +1107,8 @@ textarea:focus-visible {
 }
 
 .metric__bar-max {
-    width: 2px;
-    background: var(--color-status-failed);
+    --marker-color: var(--color-status-failed);
     z-index: 4;
-    transform: translateX(-50%);
-    /* Override the shared fill transition — this marker moves via left, not width. */
-    transition: left var(--transition-normal);
 }
 
 .metric--warn .metric__value { color: var(--color-warning); }
@@ -1287,7 +1311,7 @@ textarea:focus-visible {
     padding: 0.4rem 0.75rem;
     background: transparent;
     border: none;
-    border-left: 3px solid var(--project-color, rgba(255, 255, 255, 0.15));
+    border-left: 3px solid var(--project-color, var(--color-project-fallback));
     text-decoration: none;
     font-size: var(--font-size-sm);
     font-weight: 500;
@@ -1345,7 +1369,7 @@ textarea:focus-visible {
     display: none;
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.7);
+    background: var(--color-scrim);
     z-index: 30;
     opacity: 0;
     transition: opacity var(--transition-normal);
@@ -1437,7 +1461,7 @@ textarea:focus-visible {
 
 ::-webkit-scrollbar-thumb {
     background: var(--color-scrollbar-thumb);
-    border-radius: 4px;
+    border-radius: var(--radius);
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -1585,10 +1609,10 @@ textarea:focus-visible {
 /* Traceback highlighting */
 .log-tb-line {
     display: block;
-    border-left: 2px solid rgba(255, 69, 58, 0.5);
+    border-left: 2px solid var(--color-danger-edge);
     padding-left: 0.5rem;
     margin-left: -0.5rem;
-    background: rgba(255, 69, 58, 0.04);
+    background: var(--color-danger-tint);
 }
 
 .log-tb-start {

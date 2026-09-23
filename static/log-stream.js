@@ -124,7 +124,7 @@
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'log-copy-btn';
-        btn.textContent = 'copy';
+        btn.textContent = 'Copy';
         btn.addEventListener('click', (evt) => {
             evt.stopPropagation();
             const text = logEntries
@@ -132,8 +132,8 @@
                 .map((entry) => entry.message)
                 .join('\n');
             navigator.clipboard?.writeText(text).then(() => {
-                btn.textContent = 'copied';
-                setTimeout(() => { btn.textContent = 'copy'; }, 1200);
+                btn.textContent = 'Copied';
+                setTimeout(() => { btn.textContent = 'Copy'; }, 1200);
             });
         });
         return btn;

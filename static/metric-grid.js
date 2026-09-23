@@ -54,9 +54,9 @@
         }
     }
 
-    function setBarWidth(el, fill) {
+    function setBarFill(el, fill) {
         if (!el) return;
-        el.style.width = fill == null ? '0%' : `${Math.min(100, fill)}%`;
+        el.style.transform = `scaleX(${fill == null ? 0 : Math.min(100, fill) / 100})`;
     }
 
     function setBarMarker(el, fill) {
@@ -66,7 +66,7 @@
             return;
         }
         el.hidden = false;
-        el.style.left = `${Math.min(100, fill)}%`;
+        el.style.transform = `translateX(${Math.min(100, fill)}%)`;
     }
 
     function setTile(container, id, { value, sub, level, fill, avgFill, maxFill }) {
@@ -84,7 +84,7 @@
 
         const subEl = tile.querySelector('[data-role="sub"]');
         if (subEl) subEl.textContent = sub ?? '';
-        setBarWidth(tile.querySelector('[data-role="bar"]'), fill);
+        setBarFill(tile.querySelector('[data-role="bar"]'), fill);
         setBarMarker(tile.querySelector('[data-role="bar-avg"]'), avgFill);
         setBarMarker(tile.querySelector('[data-role="bar-max"]'), maxFill);
 
