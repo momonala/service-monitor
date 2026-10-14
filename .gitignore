@@ -96,3 +96,6 @@ alert_settings.json
 .ipython/
 .cursor/
 .claude/
+
+# Local helper, host-specific
+sync.sh
