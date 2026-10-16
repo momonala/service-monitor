@@ -12,6 +12,7 @@ dependencies = [
     "schedule>=1.0.0",
     "requests",
     "typer>=0.9.0",
+    "python-dotenv>=1.2.4",
 ]
 
 [dependency-groups]
@@ -21,8 +22,6 @@ dev = [
     "black",
     "ruff>=0.14.10",
     "isort>=7.0.0",
-    "jupyter>=1.1.1",
-    "notebook>=7.5.1",
     "pandas>=2.3.3",
 ]
 
