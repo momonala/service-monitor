@@ -2,7 +2,7 @@
 
 Storage comes from R2's REST usage endpoint (one call per bucket, current point-in-time size).
 Class A/B request counts come from the GraphQL Analytics API (`r2OperationsAdaptiveGroups`),
-summed across the account for the current calendar month — R2 bills by calendar month, so that's
+per bucket for the current calendar month — R2 bills by calendar month, so that's
 the window that matters. This app has no R2 access of its own; it only reports usage against
 Cloudflare's published free tier (https://developers.cloudflare.com/r2/pricing/) so a runaway
 process shows up here before it shows up on a bill.
@@ -25,6 +25,10 @@ GRAPHQL_URL = f"{API_BASE}/graphql"
 # Every bucket on this account was created in the EU jurisdiction; the default (no-jurisdiction)
 # bucket listing returns empty, so this header is required to see any of them.
 R2_JURISDICTION_HEADER = {"cf-r2-jurisdiction": "eu"}
+# GraphQL reports bucket names with the jurisdiction prefixed ("eu_spyglass"); the REST API doesn't.
+GRAPHQL_BUCKET_PREFIX = "eu_"
+# Requests not tied to a bucket (ListBuckets).
+ACCOUNT_LEVEL_BUCKET = "(account)"
 REQUEST_TIMEOUT_SECONDS = 15
 MAX_USAGE_WORKERS = 8
 CACHE_TTL_SECONDS = 300.0
@@ -79,14 +83,14 @@ query R2Operations($accountTag: string!, $startDate: Time, $endDate: Time) {
         filter: {datetime_geq: $startDate, datetime_leq: $endDate}
       ) {
         sum { requests }
-        dimensions { actionType }
+        dimensions { actionType bucketName }
       }
     }
   }
 }
 """
 
-_cache: tuple[float, "R2UsageSummary | None"] | None = None
+_cache: tuple[float, "R2BucketUsage | None"] | None = None
 
 
 @dataclass
@@ -97,6 +101,16 @@ class R2UsageSummary:
     class_a_pct: float
     class_b_requests: int
     class_b_pct: float
+
+
+@dataclass
+class R2BucketUsage:
+    storage_bytes: dict[str, int]
+    class_a_requests: dict[str, int]
+    class_b_requests: dict[str, int]
+
+
+R2_BREAKDOWNS = ("storage", "class_a", "class_b")
 
 
 def _api_get(path: str) -> dict | None:
@@ -138,26 +152,26 @@ def _fetch_bucket_storage_bytes(bucket_name: str) -> int | None:
     return sum(int(result[field]) for field in size_fields)
 
 
-def _fetch_total_storage_bytes() -> int | None:
-    """Sum of every bucket's current size.
+def _fetch_storage_bytes_by_bucket() -> dict[str, int] | None:
+    """{bucket: current size} for every bucket.
 
-    None (not a partial sum) if any bucket's usage is unreachable — a partial total would look
+    None (not a partial result) if any bucket's usage is unreachable — a partial total would look
     like real headroom against the free tier when it might not be.
     """
     bucket_names = _list_bucket_names()
     if bucket_names is None:
         return None
     if not bucket_names:
-        return 0
+        return {}
     with ThreadPoolExecutor(max_workers=min(MAX_USAGE_WORKERS, len(bucket_names))) as pool:
         per_bucket_bytes = list(pool.map(_fetch_bucket_storage_bytes, bucket_names))
     if any(size is None for size in per_bucket_bytes):
         return None
-    return sum(per_bucket_bytes)
+    return dict(zip(bucket_names, per_bucket_bytes))
 
 
-def _fetch_operation_counts_this_month() -> dict[str, int] | None:
-    """{actionType: request count} for the account, from the 1st of this month to now."""
+def _fetch_operation_counts_this_month() -> list[tuple[str, str, int]] | None:
+    """(bucket, actionType, request count) for the account, from the 1st of this month to now."""
     now = datetime.now(timezone.utc)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     try:
@@ -183,11 +197,26 @@ def _fetch_operation_counts_this_month() -> dict[str, int] | None:
         logger.warning("Cloudflare GraphQL returned errors: %s", payload["errors"])
         return None
     groups = payload["data"]["viewer"]["accounts"][0]["r2OperationsAdaptiveGroups"]
-    return {group["dimensions"]["actionType"]: group["sum"]["requests"] for group in groups}
+    return [
+        (
+            (group["dimensions"]["bucketName"] or ACCOUNT_LEVEL_BUCKET).removeprefix(GRAPHQL_BUCKET_PREFIX),
+            group["dimensions"]["actionType"],
+            group["sum"]["requests"],
+        )
+        for group in groups
+    ]
 
 
-def fetch_r2_usage_summary() -> R2UsageSummary | None:
-    """Month-to-date R2 usage against the free tier, or None if unconfigured/unreachable.
+def _sum_by_bucket(operations: list[tuple[str, str, int]], actions: frozenset[str]) -> dict[str, int]:
+    totals: dict[str, int] = {}
+    for bucket, action, count in operations:
+        if action in actions:
+            totals[bucket] = totals.get(bucket, 0) + count
+    return totals
+
+
+def fetch_r2_bucket_usage() -> R2BucketUsage | None:
+    """Month-to-date R2 usage per bucket, or None if unconfigured/unreachable.
 
     Cached for CACHE_TTL_SECONDS: a fresh read costs one bucket-list call, one usage call per
     bucket (parallelized), and one GraphQL call.
@@ -199,21 +228,51 @@ def fetch_r2_usage_summary() -> R2UsageSummary | None:
         if now_monotonic - cached_at < CACHE_TTL_SECONDS:
             return cached_value
 
-    summary = None
+    usage = None
     if CLOUDFLARE_API_TOKEN:
-        storage_bytes = _fetch_total_storage_bytes()
-        operation_counts = _fetch_operation_counts_this_month()
-        if storage_bytes is not None and operation_counts is not None:
-            class_a = sum(count for action, count in operation_counts.items() if action in CLASS_A_ACTIONS)
-            class_b = sum(count for action, count in operation_counts.items() if action in CLASS_B_ACTIONS)
-            summary = R2UsageSummary(
+        storage_bytes = _fetch_storage_bytes_by_bucket()
+        operations = _fetch_operation_counts_this_month()
+        if storage_bytes is not None and operations is not None:
+            usage = R2BucketUsage(
                 storage_bytes=storage_bytes,
-                storage_pct=round(storage_bytes / FREE_TIER_STORAGE_BYTES * 100, 2),
-                class_a_requests=class_a,
-                class_a_pct=round(class_a / FREE_TIER_CLASS_A_REQUESTS * 100, 2),
-                class_b_requests=class_b,
-                class_b_pct=round(class_b / FREE_TIER_CLASS_B_REQUESTS * 100, 2),
+                class_a_requests=_sum_by_bucket(operations, CLASS_A_ACTIONS),
+                class_b_requests=_sum_by_bucket(operations, CLASS_B_ACTIONS),
             )
 
-    _cache = (now_monotonic, summary)
-    return summary
+    _cache = (now_monotonic, usage)
+    return usage
+
+
+def fetch_r2_usage_summary() -> R2UsageSummary | None:
+    """Month-to-date R2 usage against the free tier, or None if unconfigured/unreachable."""
+    usage = fetch_r2_bucket_usage()
+    if usage is None:
+        return None
+    storage_bytes = sum(usage.storage_bytes.values())
+    class_a = sum(usage.class_a_requests.values())
+    class_b = sum(usage.class_b_requests.values())
+    return R2UsageSummary(
+        storage_bytes=storage_bytes,
+        storage_pct=round(storage_bytes / FREE_TIER_STORAGE_BYTES * 100, 2),
+        class_a_requests=class_a,
+        class_a_pct=round(class_a / FREE_TIER_CLASS_A_REQUESTS * 100, 2),
+        class_b_requests=class_b,
+        class_b_pct=round(class_b / FREE_TIER_CLASS_B_REQUESTS * 100, 2),
+    )
+
+
+def r2_breakdown_payload(metric: str) -> dict | None:
+    """One metric (storage, class_a, class_b) per bucket, largest first, with the total."""
+    usage = fetch_r2_bucket_usage()
+    if usage is None:
+        return None
+    per_bucket = {
+        "storage": usage.storage_bytes,
+        "class_a": usage.class_a_requests,
+        "class_b": usage.class_b_requests,
+    }[metric]
+    projects = sorted(
+        ({"project": bucket, "value": value} for bucket, value in per_bucket.items() if value > 0),
+        key=lambda row: (-row["value"], row["project"]),
+    )
+    return {"metric": metric, "projects": projects, "total": sum(per_bucket.values())}

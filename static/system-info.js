@@ -2,7 +2,7 @@
     'use strict';
 
     const {
-        levelFor, formatValue, buildTiles, setTile, showGridError, formatMegabytes, writesTile,
+        levelFor, formatValue, buildTiles, setTile, showGridError, formatMegabytes, writesTile, bindBreakdowns,
     } = window.SMMetricGrid;
 
     const REFRESH_INTERVAL = 10000;
@@ -39,8 +39,7 @@
     };
 
     let ipCopyBound = false;
-    let breakdownRequest = null;
-    let openBreakdown = null;
+    let syncBreakdownSummary = () => {};
 
     function renderIp(ip) {
         const row = document.getElementById('sidebarIp');
@@ -105,102 +104,13 @@
         return Math.min(100, Math.max(0, ((celsius - TEMP_BAR_MIN_C) / span) * 100));
     }
 
-    function breakdownRow(name, value) {
-        const row = document.createElement('li');
-        row.className = 'metric-breakdown__row';
-        const nameEl = document.createElement('span');
-        nameEl.className = 'metric-breakdown__name';
-        nameEl.textContent = name;
-        const valueEl = document.createElement('span');
-        valueEl.className = 'metric-breakdown__value';
-        valueEl.textContent = value;
-        row.append(nameEl, valueEl);
-        return row;
-    }
-
-    function renderBreakdown(list, { projects, total }, format) {
-        const totalRow = breakdownRow('All projects', format(total));
-        totalRow.classList.add('metric-breakdown__row--total');
-        const largest = projects[0].value;
-        const projectRows = projects.map(({ project, value }) => {
-            const row = breakdownRow(project, format(value));
-            const bar = document.createElement('span');
-            bar.className = 'metric-breakdown__bar';
-            bar.style.transform = `scaleX(${largest > 0 ? value / largest : 0})`;
-            row.appendChild(bar);
-            return row;
-        });
-        list.replaceChildren(totalRow, ...projectRows);
-    }
-
-    function showBreakdownMessage(list, message) {
-        const row = document.createElement('li');
-        row.className = 'metric-breakdown__message';
-        row.textContent = message;
-        list.replaceChildren(row);
-    }
-
-    async function loadBreakdown(list, metric, signal) {
-        const { format, loadingMessage = 'Loading…' } = BREAKDOWNS[metric];
-        list.setAttribute('aria-busy', 'true');
-        showBreakdownMessage(list, loadingMessage);
-        try {
-            const res = await fetch(`/api/system-info/by-project/${metric}`, { signal });
-            if (!res.ok) throw new Error(`by-project ${res.status}`);
-            const breakdown = await res.json();
-            if (!breakdown.projects.length) {
-                showBreakdownMessage(list, 'No readings recorded yet.');
-                return;
-            }
-            renderBreakdown(list, breakdown, format);
-        } catch (err) {
-            if (err.name === 'AbortError') return;
-            console.error('Project breakdown failed:', err);
-            showBreakdownMessage(list, `Could not load the breakdown — ${err.message}.`);
-        } finally {
-            list.removeAttribute('aria-busy');
-        }
-    }
-
-    function syncBreakdownSummary(container) {
-        const summary = document.getElementById('metricBreakdownSummary');
-        if (!summary || !openBreakdown) return;
-        const sub = container.querySelector(`.metric[data-metric="${openBreakdown}"] [data-role="sub"]`);
-        summary.textContent = sub?.textContent ?? '';
-    }
-
-    function bindBreakdowns(container) {
-        const panel = document.getElementById('metricBreakdown');
-        const title = document.getElementById('metricBreakdownTitle');
-        const list = document.getElementById('metricBreakdownList');
-        const tiles = container.querySelectorAll('.metric--button');
-        for (const tile of tiles) {
-            tile.setAttribute('aria-controls', panel.id);
-            tile.setAttribute('aria-expanded', 'false');
-        }
-
-        container.addEventListener('click', (event) => {
-            const tile = event.target.closest('.metric--button');
-            if (!tile) return;
-            const metric = tile.dataset.metric;
-            openBreakdown = openBreakdown === metric ? null : metric;
-            panel.hidden = openBreakdown == null;
-            for (const t of tiles) t.setAttribute('aria-expanded', String(t.dataset.metric === openBreakdown));
-            breakdownRequest?.abort();
-            breakdownRequest = null;
-            if (!openBreakdown) return;
-            panel.dataset.metric = metric;
-            title.textContent = BREAKDOWNS[metric].title;
-            syncBreakdownSummary(container);
-            breakdownRequest = new AbortController();
-            loadBreakdown(list, metric, breakdownRequest.signal);
-        });
-    }
-
     function render(container, info) {
         if (!container.querySelector('.metric')) {
             buildTiles(container, TILES);
-            bindBreakdowns(container);
+            syncBreakdownSummary = bindBreakdowns(container, document.getElementById('metricBreakdown'), {
+                breakdowns: BREAKDOWNS,
+                endpoint: (metric) => `/api/system-info/by-project/${metric}`,
+            });
         }
         container.removeAttribute('aria-busy');
 
@@ -252,7 +162,7 @@
             level: levelFor(writesPct, WARN_PCT, CRIT_PCT),
             fill: writesPct,
         });
-        syncBreakdownSummary(container);
+        syncBreakdownSummary();
     }
 
     async function refresh(container) {

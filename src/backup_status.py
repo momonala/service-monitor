@@ -1,6 +1,6 @@
 """Cloud-backup freshness per project, for the sidebar's backup icon.
 
-Reads the manifest and R2 object hashes written by `~/backup-db-cloudflare-r2/backup.sh` (that
+Reads the manifest and R2 object hashes written by `~/db-backup-services/cloudflare-r2-db-backup/backup.sh` (that
 script owns discovery, snapshotting, and uploading; this module only reads its state). A project
 can own zero, one, or many SQLite dbs (see the manifest's `<repo>/data/...` keys); the reported
 status is the worst of its dbs.

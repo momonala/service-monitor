@@ -451,3 +451,21 @@ def test_system_info_by_project_returns_ranked_projects(client, metric, monkeypa
 def test_system_info_by_project_rejects_temperature(client):
     response = client.get("/api/system-info/by-project/temperature")
     assert response.status_code == 400
+
+
+@patch("src.app.r2_breakdown_payload")
+def test_r2_usage_by_project_returns_payload(mock_payload, client):
+    mock_payload.return_value = {"metric": "storage", "projects": [{"project": "a", "value": 5}], "total": 5}
+    response = client.get("/api/r2-usage/by-project/storage")
+    assert response.status_code == 200
+    assert response.get_json()["total"] == 5
+    mock_payload.assert_called_once_with("storage")
+
+
+def test_r2_usage_by_project_rejects_unknown_metric(client):
+    assert client.get("/api/r2-usage/by-project/egress").status_code == 400
+
+
+@patch("src.app.r2_breakdown_payload", return_value=None)
+def test_r2_usage_by_project_unavailable(mock_payload, client):
+    assert client.get("/api/r2-usage/by-project/storage").status_code == 503

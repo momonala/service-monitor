@@ -16,7 +16,7 @@ from requests import RequestException
 from src.backup_status import backup_statuses_for_groups
 from src.canned_info import canned_service_statuses, canned_system_info, websites
 from src.config import FLASK_PORT
-from src.r2_usage import R2UsageSummary, fetch_r2_usage_summary
+from src.r2_usage import R2_BREAKDOWNS, R2UsageSummary, fetch_r2_usage_summary, r2_breakdown_payload
 from src.scheduler import (
     DEFAULT_ALERT_FREQUENCY,
     VALID_FREQUENCIES,
@@ -314,6 +314,21 @@ def r2_usage():
     if summary is None:
         return jsonify({field.name: None for field in fields(R2UsageSummary)})
     return jsonify(asdict(summary))
+
+
+@app.route("/api/r2-usage/by-project/<metric>")
+def r2_usage_by_project(metric: str):
+    """Return one R2 metric (storage, class_a, class_b) per project bucket, largest first, with the total."""
+    if metric not in R2_BREAKDOWNS:
+        return jsonify({"error": f"Invalid metric: {metric}"}), 400
+    try:
+        payload = r2_breakdown_payload(metric)
+    except Exception:
+        logger.exception("Failed to compute R2 %s by project", metric)
+        payload = None
+    if payload is None:
+        return jsonify({"error": "R2 usage unavailable"}), 503
+    return jsonify(payload)
 
 
 @app.route("/api/system-info")

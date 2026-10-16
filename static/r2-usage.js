@@ -1,7 +1,7 @@
 (function() {
     'use strict';
 
-    const { levelFor, buildTiles, setTile, showGridError } = window.SMMetricGrid;
+    const { levelFor, buildTiles, setTile, showGridError, bindBreakdowns } = window.SMMetricGrid;
 
     const REFRESH_INTERVAL = 60000; // server caches for 5 min; poll faster just to catch that refresh
 
@@ -14,10 +14,22 @@
     const FREE_TIER_CLASS_B_REQUESTS = 10_000_000;
 
     const TILES = [
-        { id: 'storage', icon: 'disk', label: 'R2 Storage', bar: true },
-        { id: 'class_a', icon: 'upload', label: 'R2 Class A', bar: true },
-        { id: 'class_b', icon: 'download', label: 'R2 Class B', bar: true },
+        { id: 'storage', icon: 'disk', label: 'R2 Storage', bar: true, button: true },
+        { id: 'class_a', icon: 'upload', label: 'R2 Class A', bar: true, button: true },
+        { id: 'class_b', icon: 'download', label: 'R2 Class B', bar: true, button: true },
     ];
+
+    const BREAKDOWNS = {
+        storage: { title: 'R2 storage by project', format: formatBytes },
+        class_a: { title: 'R2 Class A requests by project, this month', format: (n) => n.toLocaleString() },
+        class_b: { title: 'R2 Class B requests by project, this month', format: (n) => n.toLocaleString() },
+    };
+
+    let syncBreakdownSummary = () => {};
+
+    function formatBytes(bytes) {
+        return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(2)} GB` : `${Math.round(bytes / 1e6)} MB`;
+    }
 
     function formatPct(pct) {
         return pct == null ? '—' : `${pct}%`;
@@ -34,7 +46,13 @@
     }
 
     function render(container, usage) {
-        if (!container.querySelector('.metric')) buildTiles(container, TILES);
+        if (!container.querySelector('.metric')) {
+            buildTiles(container, TILES);
+            syncBreakdownSummary = bindBreakdowns(container, document.getElementById('r2Breakdown'), {
+                breakdowns: BREAKDOWNS,
+                endpoint: (metric) => `/api/r2-usage/by-project/${metric}`,
+            });
+        }
 
         setTile(container, 'storage', {
             value: formatPct(usage.storage_pct),
@@ -58,6 +76,7 @@
             level: levelFor(usage.class_b_pct, WARN_PCT, CRIT_PCT),
             fill: usage.class_b_pct,
         });
+        syncBreakdownSummary();
     }
 
     async function refresh(section, container) {

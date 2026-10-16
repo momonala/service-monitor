@@ -105,7 +105,7 @@ service-monitor/
 │   ├── scheduler.py    # Background health check + per-service alert frequency; starts the metrics sampler
 │   ├── system_metrics.py # 1Hz host + 30s per-service metric sampler; history queries and payloads
 │   ├── metrics_store.py  # buffered, time-keyed SQLite storage for the sampler's ticks
-│   ├── backup_status.py # Per-project cloud-backup freshness, read from ~/backup-db-cloudflare-r2's manifest
+│   ├── backup_status.py # Per-project cloud-backup freshness, read from the R2 db backup's manifest
 │   ├── r2_usage.py     # Cloudflare R2 usage for the current billing month, vs. the free tier
 │   ├── telegram.py     # Shared Telegram transport; service-failure message formatting
 │   ├── canned_info.py  # Static website links + canned ServiceStatus fixtures for dev/testing
@@ -176,6 +176,7 @@ Secrets and host paths live in `src/values.py` (gitignored). Copy `src/values.py
 | `/api/services/sidebar-details` | GET | JSON: enriched status + CI for all services (loaded async after first paint) |
 | `/api/services/backup-status` | GET | JSON: per-project cloud-backup status (`green`/`red` + stale flag), loaded separately since it costs an R2 round-trip per project |
 | `/api/r2-usage` | GET | JSON: this month's Cloudflare R2 usage vs. the free tier; nulls if no Cloudflare token configured |
+| `/api/r2-usage/by-project/<metric>` | GET | JSON: one R2 metric (`storage`, `class_a`, `class_b`) per project bucket, largest first, with the total |
 | `/api/system-info` | GET | JSON: host (Pi) vitals — temperature, CPU, memory, disk, uptime |
 | `/api/system-info/history` | GET | JSON: windowed host vitals time series for the dashboard chart (`window`, `rollup` params) |
 | `/api/services/current` | GET | JSON: one service's most recent CPU/memory reading, for the live tiles on its detail view (`service` param) |
@@ -249,7 +250,7 @@ Returns:
 }
 ```
 One entry per project (not per service — same suffix-less rule as `ci_status`), read via `backup_status.py`
-from the manifest/R2 state written by `~/backup-db-cloudflare-r2/backup.sh`. `backup_status` is `green`
+from the manifest/R2 state written by `~/db-backup-services/cloudflare-r2-db-backup/backup.sh`. `backup_status` is `green`
 (last uploaded backup is intact in R2) or `red` (missing/corrupted); `backup_stale` flags that the local
 source has changed since that backup was taken. A project is omitted if it owns no tracked databases.
 

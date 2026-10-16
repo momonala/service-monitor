@@ -1062,7 +1062,7 @@ textarea:focus-visible {
     margin-top: var(--spacing-md);
     padding: var(--spacing-md);
     background: var(--color-bg-panel);
-    border: 1px solid var(--series-color);
+    border: 1px solid var(--series-color, var(--border-color));
     border-radius: var(--radius);
 }
 
@@ -1110,7 +1110,7 @@ textarea:focus-visible {
     grid-column: 1 / -1;
     height: 4px;
     margin-top: var(--spacing-xs);
-    background: var(--series-color);
+    background: var(--series-color, var(--color-accent));
     border-radius: var(--radius);
     transform-origin: left;
 }
