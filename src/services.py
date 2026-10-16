@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 SERVICES_CACHE_TTL_SECONDS = 5.0
 CI_STATUS_CACHE_TTL_SECONDS = 60.0
+DU_TIMEOUT_SECONDS = 60
 SYSTEMD_UNSET = 2**64 - 1  # value systemd reports for an unset uint64 property (e.g. MemoryCurrent=[not set])
 _services_cache: tuple[float, list[str]] | None = None
 _ci_status_cache: dict[str, tuple[float, str | None]] = {}
@@ -356,34 +357,46 @@ class ServiceCounters:
     written_bytes: int | None = None
 
 
-def read_service_metrics(units: list[str]) -> dict[str, ServiceCounters]:
-    """Return {unit: ServiceCounters} for the given units in one systemctl call."""
+def _systemctl_show(units: list[str], properties: list[str]) -> dict[str, dict[str, str]]:
+    """Return {unit: {property: value}} from one `systemctl show` call.
+
+    Raises:
+        subprocess.CalledProcessError: systemctl exited non-zero.
+    """
     if not units:
         return {}
     result = subprocess.run(
-        ["systemctl", "show", "--property=Id,ControlGroup,CPUUsageNSec", *units],
+        ["systemctl", "show", f"--property=Id,{','.join(properties)}", *units],
         text=True,
         capture_output=True,
+        check=True,
     )
-    if result.returncode != 0:
-        logger.warning("systemctl show failed: %s", result.stderr.strip())
-        return {}
 
     # `systemctl show <a> <b>` emits one blank-line-separated block per unit, but a unit type that
     # doesn't support a requested property (e.g. .timer units have no ControlGroup/CPUUsageNSec on
     # some systemd versions) can emit zero lines for that block, shifting every later block out of
     # argument order. Key each block by its own Id= line instead of trusting position.
-    metrics: dict[str, ServiceCounters] = {}
+    by_unit: dict[str, dict[str, str]] = {}
     for block in result.stdout.strip().split("\n\n"):
-        if not block.strip():
-            continue
         raw_values: dict[str, str] = {}
         for line in block.splitlines():
             key, _, raw = line.partition("=")
             raw_values[key] = raw.strip()
-        unit = raw_values.get("Id", "")
-        if not unit:
-            continue
+        unit = raw_values.pop("Id", "")
+        if unit:
+            by_unit[unit] = raw_values
+    return by_unit
+
+
+def read_service_metrics(units: list[str]) -> dict[str, ServiceCounters]:
+    """Return {unit: ServiceCounters} for the given units in one systemctl call."""
+    try:
+        shown = _systemctl_show(units, ["ControlGroup", "CPUUsageNSec"])
+    except subprocess.CalledProcessError as exc:
+        logger.warning("systemctl show failed: %s", exc.stderr.strip())
+        return {}
+    metrics: dict[str, ServiceCounters] = {}
+    for unit, raw_values in shown.items():
         cgroup = raw_values.get("ControlGroup", "")
         metrics[unit] = ServiceCounters(
             memory_bytes=_read_cgroup_anon(cgroup) if cgroup else None,
@@ -393,6 +406,36 @@ def read_service_metrics(units: list[str]) -> dict[str, ServiceCounters]:
     for unit in units:
         metrics.setdefault(unit, ServiceCounters())
     return metrics
+
+
+def read_working_directories(units: list[str]) -> dict[str, Path]:
+    """Return {unit: WorkingDirectory} for the units that set one (timers don't)."""
+    return {
+        unit: Path(raw_values["WorkingDirectory"])
+        for unit, raw_values in _systemctl_show(units, ["WorkingDirectory"]).items()
+        if raw_values.get("WorkingDirectory")
+    }
+
+
+def outermost_directories(directories: set[Path]) -> set[Path]:
+    """Drop every directory nested inside another one in the set, so none is counted twice."""
+    return {
+        directory
+        for directory in directories
+        if not any(other != directory and directory.is_relative_to(other) for other in directories)
+    }
+
+
+def read_directory_size_kb(directory: Path) -> int | None:
+    """Return a directory tree's on-disk size in KB via `du`, or None when it can't be measured."""
+    try:
+        result = subprocess.run(
+            ["du", "-skx", str(directory)], text=True, capture_output=True, timeout=DU_TIMEOUT_SECONDS
+        )
+        return int(result.stdout.split()[0])
+    except (subprocess.TimeoutExpired, OSError, IndexError, ValueError):
+        logger.warning("Could not measure %s", directory)
+        return None
 
 
 def _read_cgroup_written_bytes(cgroup_path: str) -> int | None:

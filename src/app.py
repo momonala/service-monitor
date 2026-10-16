@@ -35,6 +35,7 @@ from src.services import (
     parse_service_name,
 )
 from src.system_metrics import (
+    BREAKDOWNS,
     DEFAULT_ROLLUP,
     DEFAULT_WINDOW,
     ROLLUPS,
@@ -43,9 +44,9 @@ from src.system_metrics import (
     host_writes_payload,
     latest_service_sample_payload,
     latest_service_samples_payload,
+    project_breakdown_payload,
     service_history_payload,
     temperature_window_stats,
-    writes_by_project_payload,
 )
 from src.telegram import send_telegram_message
 from src.values import INSPECTOR_DETECTOR_CWD, INSPECTOR_DETECTOR_UV_PATH
@@ -340,14 +341,16 @@ def system_info():
     return jsonify(payload)
 
 
-@app.route("/api/system-info/writes-by-project")
-def system_info_writes_by_project():
-    """Return the last 24h of disk writes per project, largest first."""
+@app.route("/api/system-info/by-project/<metric>")
+def system_info_by_project(metric: str):
+    """Return one metric (cpu, memory, disk, writes) per project, largest first, with the total."""
+    if metric not in BREAKDOWNS:
+        return jsonify({"error": f"Invalid metric: {metric}"}), 400
     try:
-        return jsonify(writes_by_project_payload())
+        return jsonify(project_breakdown_payload(metric))
     except Exception:
-        logger.exception("Failed to compute disk writes by project")
-        return jsonify({"error": "failed to compute disk writes by project"}), 500
+        logger.exception("Failed to compute %s by project", metric)
+        return jsonify({"error": f"failed to compute {metric} by project"}), 500
 
 
 @app.route("/api/system-info/history")

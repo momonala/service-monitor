@@ -25,10 +25,13 @@ from src.services import (
     cpu_percent_from_delta,
     get_services,
     is_linux,
+    outermost_directories,
     parse_service_name,
+    read_directory_size_kb,
     read_root_sectors_written,
     read_service_metrics,
     read_total_memory_bytes,
+    read_working_directories,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,6 +49,7 @@ WINDOWS: dict[str, int] = {
     "7d": RETENTION_SECONDS,
 }
 WRITES_WINDOW = "24h"
+PROJECT_SIZES_TTL_SECONDS = 30 * 60
 DEFAULT_ROLLUP = "30s"
 ROLLUPS: dict[str, int] = {
     "30s": 30,
@@ -58,6 +62,8 @@ _sampler_started = False
 _sampler_lock = threading.Lock()
 _default_store: MetricsStore | None = None
 _default_store_lock = threading.Lock()
+_project_sizes_cache: tuple[float, dict[str, float]] | None = None
+_project_sizes_lock = threading.Lock()
 
 
 class CpuDeltaTracker:
@@ -647,6 +653,11 @@ def _canned_written_mb(service: str) -> float:
     return float(sum(ord(c) for c in service) % 400)
 
 
+def _canned_size_kb(service: str) -> float:
+    """Stable fake directory size per unit for off-Pi dev mode."""
+    return float(sum(ord(c) for c in service) % 900 * 4096)
+
+
 def service_writes_payload(service: str, now: float | None = None, store: MetricsStore | None = None) -> dict:
     """One service's disk writes over the last 24h, for its detail-view tile."""
     end = time.time() if now is None else now
@@ -658,21 +669,95 @@ def service_writes_payload(service: str, now: float | None = None, store: Metric
     return _writes_summary(total_kb, first_ts, end)
 
 
-def writes_by_project_payload(now: float | None = None, store: MetricsStore | None = None) -> dict:
-    """Disk writes over the last 24h summed per project, largest first."""
-    end = time.time() if now is None else now
-    if is_linux():
-        by_service = (store or default_store()).written_kb_by_service(
-            end - window_seconds(WRITES_WINDOW), end
-        )
-    else:
-        by_service = {unit: _canned_written_mb(unit) * 1024 for unit in get_services()}
+def _sum_by_project(by_service: dict[str, float | None]) -> dict[str, float]:
     by_project: defaultdict[str, float] = defaultdict(float)
-    for service, kb in by_service.items():
-        project, _ = parse_service_name(service)
-        by_project[project] += kb
+    for service, value in by_service.items():
+        if value is not None:
+            by_project[parse_service_name(service)[0]] += value
+    return by_project
+
+
+def _latest_service_samples_for_breakdown(store: MetricsStore | None) -> list[ServiceSample]:
+    services = get_services()
+    if is_linux():
+        return list(get_latest_service_samples(services, store=store).values())
+    return [canned_service_history(service, window="1h", rollup="30s")[-1] for service in services]
+
+
+def _cpu_percent_by_project(now: float, store: MetricsStore | None) -> dict[str, float]:
+    samples = _latest_service_samples_for_breakdown(store)
+    return _sum_by_project({sample.service: sample.cpu_percent for sample in samples})
+
+
+def _memory_mb_by_project(now: float, store: MetricsStore | None) -> dict[str, float]:
+    samples = _latest_service_samples_for_breakdown(store)
+    memory_pct = _sum_by_project({sample.service: sample.memory_used_pct for sample in samples})
+    total_mb = _total_memory_mb()
+    return {project: pct / 100 * total_mb for project, pct in memory_pct.items()}
+
+
+def _written_mb_by_project(now: float, store: MetricsStore | None) -> dict[str, float]:
+    if is_linux():
+        start = now - window_seconds(WRITES_WINDOW)
+        written_kb = (store or default_store()).written_kb_by_service(start, now)
+    else:
+        written_kb = {unit: _canned_written_mb(unit) * 1024 for unit in get_services()}
+    return {project: kb / 1024 for project, kb in _sum_by_project(written_kb).items()}
+
+
+def _measure_project_sizes_kb() -> dict[str, float]:
+    if not is_linux():
+        return _sum_by_project({unit: _canned_size_kb(unit) for unit in get_services()})
+    directories: defaultdict[str, set[Path]] = defaultdict(set)
+    for unit, directory in read_working_directories(get_services()).items():
+        directories[parse_service_name(unit)[0]].add(directory)
+    sizes: dict[str, float] = {}
+    for project, project_directories in directories.items():
+        measured_kb = [read_directory_size_kb(d) for d in outermost_directories(project_directories)]
+        sizes[project] = float(sum(kb for kb in measured_kb if kb is not None))
+    return sizes
+
+
+def project_sizes_kb() -> dict[str, float]:
+    """On-disk size of each project's working directories, re-measured at most every PROJECT_SIZES_TTL_SECONDS."""
+    global _project_sizes_cache
+    with _project_sizes_lock:
+        measured_at = time.monotonic()
+        if _project_sizes_cache is None or measured_at - _project_sizes_cache[0] > PROJECT_SIZES_TTL_SECONDS:
+            _project_sizes_cache = (measured_at, _measure_project_sizes_kb())
+        return _project_sizes_cache[1]
+
+
+def _disk_mb_by_project(now: float, store: MetricsStore | None) -> dict[str, float]:
+    return {project: kb / 1024 for project, kb in project_sizes_kb().items()}
+
+
+BREAKDOWNS: dict[str, Callable[[float, MetricsStore | None], dict[str, float]]] = {
+    "cpu": _cpu_percent_by_project,
+    "memory": _memory_mb_by_project,
+    "disk": _disk_mb_by_project,
+    "writes": _written_mb_by_project,
+}
+
+
+def project_breakdown_payload(
+    metric: str, now: float | None = None, store: MetricsStore | None = None
+) -> dict:
+    """One metric summed per project, largest first, plus the total across projects.
+
+    cpu is percent of the host and memory is MB, both from the latest tick; disk is the MB the
+    project's working directories take up; writes is MB written over the last 24h.
+
+    Raises:
+        KeyError: metric is not one of BREAKDOWNS.
+    """
+    by_project = BREAKDOWNS[metric](time.time() if now is None else now, store)
     ranked = sorted(by_project.items(), key=lambda item: (-item[1], item[0]))
-    return {"projects": [{"project": project, "written_mb": round(kb / 1024, 1)} for project, kb in ranked]}
+    return {
+        "metric": metric,
+        "total": round(sum(by_project.values()), 1),
+        "projects": [{"project": project, "value": round(value, 1)} for project, value in ranked],
+    }
 
 
 def latest_service_sample_payload(service: str, store: MetricsStore | None = None) -> dict:

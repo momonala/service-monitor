@@ -16,18 +16,31 @@
     // Temperature bar maps this Celsius window onto 0–100% fill.
     const TEMP_BAR_MIN_C = 40;
     const TEMP_BAR_MAX_C = 80;
+    const WRITES_BAR_FULL_MB = 20 * 1024;
 
     // Same order as the history chart series.
     const TILES = [
-        { id: 'cpu', icon: 'cpu', label: 'CPU', bar: true },
-        { id: 'disk', icon: 'disk', label: 'Disk', bar: true },
-        { id: 'temperature', icon: 'thermometer', label: 'Temperature', dualBar: true },
-        { id: 'memory', icon: 'memory', label: 'Memory', bar: true },
-        { id: 'writes', icon: 'activity', label: 'Disk writes', bar: false, button: true },
+        { id: 'writes', icon: 'activity', label: 'Disk writes', shortLabel: 'Writes', bar: true, button: true },
+        { id: 'cpu', icon: 'cpu', label: 'CPU', bar: true, button: true },
+        { id: 'disk', icon: 'disk', label: 'Disk', bar: true, button: true },
+        { id: 'temperature', icon: 'thermometer', label: 'Temperature', shortLabel: 'Temp', dualBar: true },
+        { id: 'memory', icon: 'memory', label: 'Memory', bar: true, button: true },
     ];
+
+    const BREAKDOWNS = {
+        cpu: { title: 'CPU by project, latest reading', format: (pct) => formatValue(pct, '%') },
+        memory: { title: 'Memory by project, latest reading', format: formatMegabytes },
+        disk: {
+            title: 'Disk space by project directory',
+            format: formatMegabytes,
+            loadingMessage: 'Measuring project directories…',
+        },
+        writes: { title: 'Disk writes by project, last 24h', format: formatMegabytes },
+    };
 
     let ipCopyBound = false;
     let breakdownRequest = null;
+    let openBreakdown = null;
 
     function renderIp(ip) {
         const row = document.getElementById('sidebarIp');
@@ -92,74 +105,102 @@
         return Math.min(100, Math.max(0, ((celsius - TEMP_BAR_MIN_C) / span) * 100));
     }
 
-    function renderBreakdownRow(list, { project, written_mb }, largest) {
+    function breakdownRow(name, value) {
         const row = document.createElement('li');
-        row.className = 'writes-breakdown__row';
-        const name = document.createElement('span');
-        name.className = 'writes-breakdown__name';
-        name.textContent = project;
-        const value = document.createElement('span');
-        value.className = 'writes-breakdown__value';
-        value.textContent = formatMegabytes(written_mb);
-        const bar = document.createElement('span');
-        bar.className = 'writes-breakdown__bar';
-        bar.style.transform = `scaleX(${largest > 0 ? written_mb / largest : 0})`;
-        row.append(name, value, bar);
-        list.appendChild(row);
+        row.className = 'metric-breakdown__row';
+        const nameEl = document.createElement('span');
+        nameEl.className = 'metric-breakdown__name';
+        nameEl.textContent = name;
+        const valueEl = document.createElement('span');
+        valueEl.className = 'metric-breakdown__value';
+        valueEl.textContent = value;
+        row.append(nameEl, valueEl);
+        return row;
+    }
+
+    function renderBreakdown(list, { projects, total }, format) {
+        const totalRow = breakdownRow('All projects', format(total));
+        totalRow.classList.add('metric-breakdown__row--total');
+        const largest = projects[0].value;
+        const projectRows = projects.map(({ project, value }) => {
+            const row = breakdownRow(project, format(value));
+            const bar = document.createElement('span');
+            bar.className = 'metric-breakdown__bar';
+            bar.style.transform = `scaleX(${largest > 0 ? value / largest : 0})`;
+            row.appendChild(bar);
+            return row;
+        });
+        list.replaceChildren(totalRow, ...projectRows);
     }
 
     function showBreakdownMessage(list, message) {
         const row = document.createElement('li');
-        row.className = 'writes-breakdown__message';
+        row.className = 'metric-breakdown__message';
         row.textContent = message;
         list.replaceChildren(row);
     }
 
-    async function loadWritesBreakdown(list, signal) {
+    async function loadBreakdown(list, metric, signal) {
+        const { format, loadingMessage = 'Loading…' } = BREAKDOWNS[metric];
         list.setAttribute('aria-busy', 'true');
-        showBreakdownMessage(list, 'Loading…');
+        showBreakdownMessage(list, loadingMessage);
         try {
-            const res = await fetch('/api/system-info/writes-by-project', { signal });
-            if (!res.ok) throw new Error(`writes-by-project ${res.status}`);
-            const { projects } = await res.json();
-            if (!projects.length) {
-                showBreakdownMessage(list, 'No writes recorded yet.');
+            const res = await fetch(`/api/system-info/by-project/${metric}`, { signal });
+            if (!res.ok) throw new Error(`by-project ${res.status}`);
+            const breakdown = await res.json();
+            if (!breakdown.projects.length) {
+                showBreakdownMessage(list, 'No readings recorded yet.');
                 return;
             }
-            list.replaceChildren();
-            const largest = projects[0].written_mb;
-            projects.forEach((entry) => renderBreakdownRow(list, entry, largest));
+            renderBreakdown(list, breakdown, format);
         } catch (err) {
             if (err.name === 'AbortError') return;
-            console.error('Writes breakdown failed:', err);
+            console.error('Project breakdown failed:', err);
             showBreakdownMessage(list, `Could not load the breakdown — ${err.message}.`);
         } finally {
             list.removeAttribute('aria-busy');
         }
     }
 
-    function bindWritesBreakdown(container) {
-        const tile = container.querySelector('.metric[data-metric="writes"]');
-        const panel = document.getElementById('writesBreakdown');
-        const list = document.getElementById('writesBreakdownList');
-        if (!tile || !panel || !list) return;
+    function syncBreakdownSummary(container) {
+        const summary = document.getElementById('metricBreakdownSummary');
+        if (!summary || !openBreakdown) return;
+        const sub = container.querySelector(`.metric[data-metric="${openBreakdown}"] [data-role="sub"]`);
+        summary.textContent = sub?.textContent ?? '';
+    }
 
-        tile.setAttribute('aria-controls', panel.id);
-        tile.setAttribute('aria-expanded', 'false');
-        tile.addEventListener('click', () => {
-            const open = panel.hidden;
-            panel.hidden = !open;
-            tile.setAttribute('aria-expanded', String(open));
+    function bindBreakdowns(container) {
+        const panel = document.getElementById('metricBreakdown');
+        const title = document.getElementById('metricBreakdownTitle');
+        const list = document.getElementById('metricBreakdownList');
+        const tiles = container.querySelectorAll('.metric--button');
+        for (const tile of tiles) {
+            tile.setAttribute('aria-controls', panel.id);
+            tile.setAttribute('aria-expanded', 'false');
+        }
+
+        container.addEventListener('click', (event) => {
+            const tile = event.target.closest('.metric--button');
+            if (!tile) return;
+            const metric = tile.dataset.metric;
+            openBreakdown = openBreakdown === metric ? null : metric;
+            panel.hidden = openBreakdown == null;
+            for (const t of tiles) t.setAttribute('aria-expanded', String(t.dataset.metric === openBreakdown));
             breakdownRequest?.abort();
-            breakdownRequest = open ? new AbortController() : null;
-            if (open) loadWritesBreakdown(list, breakdownRequest.signal);
+            breakdownRequest = null;
+            if (!openBreakdown) return;
+            panel.dataset.metric = metric;
+            title.textContent = BREAKDOWNS[metric].title;
+            syncBreakdownSummary(container);
+            breakdownRequest = new AbortController();
+            loadBreakdown(list, metric, breakdownRequest.signal);
         });
     }
 
     function render(container, info) {
         if (!container.querySelector('.metric')) {
             buildTiles(container, TILES);
-            bindWritesBreakdown(container);
+            bindBreakdowns(container);
         }
         container.removeAttribute('aria-busy');
 
@@ -205,7 +246,13 @@
             fill: info.memory_used_pct,
         });
 
-        setTile(container, 'writes', writesTile(info));
+        const writesPct = info.disk_written_mb == null ? null : (info.disk_written_mb / WRITES_BAR_FULL_MB) * 100;
+        setTile(container, 'writes', {
+            ...writesTile(info),
+            level: levelFor(writesPct, WARN_PCT, CRIT_PCT),
+            fill: writesPct,
+        });
+        syncBreakdownSummary(container);
     }
 
     async function refresh(container) {

@@ -299,6 +299,17 @@ Sources: `temperature_c` from `/sys/class/thermal/thermal_zone0/temp`; `cpu_perc
 `temperature_avg_24h`/`temperature_max_24h` from the stored metrics history; `cpu_count`, `disk_*`,
 and `local_ip` via stdlib (`os`, `shutil`, `socket`), so they populate cross-platform.
 
+### GET `/api/system-info/by-project/<metric>`
+
+One metric summed per project (units grouped by `parse_service_name`), largest first, for the panel
+that opens when you click a dashboard tile. Returns `{"metric", "total", "projects": [{"project", "value"}]}`.
+
+- `cpu`: percent of the host, latest 30s tick. `memory`: MB, latest tick.
+- `disk`: MB used by each project's unit `WorkingDirectory` (nested directories counted once), measured
+  with `du` and cached for 30 minutes, so the first request can take several seconds.
+- `writes`: MB written over the last 24h.
+- `400` for any other metric (temperature has no per-project split).
+
 ### GET `/api/system-info/history`
 
 Windowed host vitals time series for the dashboard-home chart. Read from the metrics store (buffered

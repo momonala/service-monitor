@@ -22,13 +22,13 @@ from src.system_metrics import (
     history_payload,
     host_writes_payload,
     latest_service_samples_payload,
+    project_breakdown_payload,
     sample_from_info,
     sample_services,
     service_cpu_percent,
     service_history_payload,
     service_writes_payload,
     temperature_window_stats,
-    writes_by_project_payload,
 )
 
 
@@ -556,16 +556,89 @@ def test_writes_payload_with_no_readings_is_null(metrics_store: MetricsStore, mo
     }
 
 
-def test_writes_by_project_groups_units_and_sorts_largest_first(metrics_store: MetricsStore, monkeypatch):
-    monkeypatch.setattr("src.system_metrics.is_linux", lambda: True)
-    now = 1_700_000_000.0
+def _breakdown_tick(store: MetricsStore, now: float) -> None:
     services = [
-        ServiceSample(now - 60, "projects_small.service", 1.0, 1.0, 1024.0),
-        ServiceSample(now - 60, "projects_big.service", 1.0, 1.0, 2048.0),
-        ServiceSample(now - 60, "projects_big_worker.service", 1.0, 1.0, 1024.0),
+        ServiceSample(now - 60, "projects_small.service", 1.0, 2.0, 1024.0),
+        ServiceSample(now - 60, "projects_big.service", 10.0, 5.0, 2048.0),
+        ServiceSample(now - 60, "projects_big_worker.service", 5.0, None, 1024.0),
     ]
-    metrics_store.append(make_tick(_sample(now - 60), services))
+    store.append(make_tick(_sample(now - 60), services))
 
-    assert writes_by_project_payload(now=now, store=metrics_store) == {
-        "projects": [{"project": "big", "written_mb": 3.0}, {"project": "small", "written_mb": 1.0}]
+
+@pytest.fixture
+def linux_units(monkeypatch):
+    monkeypatch.setattr("src.system_metrics.is_linux", lambda: True)
+    monkeypatch.setattr(
+        "src.system_metrics.get_services",
+        lambda: ["projects_small.service", "projects_big.service", "projects_big_worker.service"],
+    )
+
+
+def test_writes_by_project_groups_units_and_sorts_largest_first(metrics_store: MetricsStore, linux_units):
+    now = 1_700_000_000.0
+    _breakdown_tick(metrics_store, now)
+
+    assert project_breakdown_payload("writes", now=now, store=metrics_store) == {
+        "metric": "writes",
+        "total": 4.0,
+        "projects": [{"project": "big", "value": 3.0}, {"project": "small", "value": 1.0}],
     }
+
+
+def test_cpu_by_project_sums_latest_reading_and_skips_missing(metrics_store: MetricsStore, linux_units):
+    _breakdown_tick(metrics_store, 1_700_000_000.0)
+
+    assert project_breakdown_payload("cpu", store=metrics_store) == {
+        "metric": "cpu",
+        "total": 7.0,
+        "projects": [{"project": "big", "value": 5.0}, {"project": "small", "value": 2.0}],
+    }
+
+
+def test_memory_by_project_converts_percent_to_mb(metrics_store: MetricsStore, linux_units, monkeypatch):
+    monkeypatch.setattr("src.system_metrics.read_total_memory_bytes", lambda: 1000 * 1024 * 1024)
+    _breakdown_tick(metrics_store, 1_700_000_000.0)
+
+    assert project_breakdown_payload("memory", store=metrics_store) == {
+        "metric": "memory",
+        "total": 160.0,
+        "projects": [{"project": "big", "value": 150.0}, {"project": "small", "value": 10.0}],
+    }
+
+
+def test_disk_by_project_measures_outermost_dirs_once_and_caches(linux_units, monkeypatch, tmp_path: Path):
+    monkeypatch.setattr("src.system_metrics._project_sizes_cache", None)
+    monkeypatch.setattr(
+        "src.system_metrics.read_working_directories",
+        lambda units: {
+            "projects_small.service": tmp_path / "small",
+            "projects_big.service": tmp_path / "big",
+            "projects_big_worker.service": tmp_path / "big" / "worker",
+        },
+    )
+    measured: list[Path] = []
+
+    def fake_size(directory: Path) -> int:
+        measured.append(directory)
+        return 2048 if directory.name == "big" else 1024
+
+    monkeypatch.setattr("src.system_metrics.read_directory_size_kb", fake_size)
+
+    first = project_breakdown_payload("disk")
+    second = project_breakdown_payload("disk")
+
+    assert (
+        first
+        == second
+        == {
+            "metric": "disk",
+            "total": 3.0,
+            "projects": [{"project": "big", "value": 2.0}, {"project": "small", "value": 1.0}],
+        }
+    )
+    assert sorted(measured) == [tmp_path / "big", tmp_path / "small"]
+
+
+def test_breakdown_rejects_unknown_metric():
+    with pytest.raises(KeyError):
+        project_breakdown_payload("temperature")

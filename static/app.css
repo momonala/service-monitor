@@ -933,8 +933,20 @@ textarea:focus-visible {
         display: none;
     }
 
-    .metric-grid--system .metric:not([aria-expanded="true"]) .metric__sub {
+    .metric-grid--system .metric__sub {
         display: none;
+    }
+
+    .metric__label .metric__label-full {
+        display: none;
+    }
+
+    .metric__label .metric__label-short {
+        display: inline;
+    }
+
+    .metric-breakdown__summary {
+        display: block;
     }
 
     .metric-grid .metric__bar {
@@ -995,12 +1007,14 @@ textarea:focus-visible {
 }
 
 .metric[data-metric="cpu"],
+.metric-breakdown[data-metric="cpu"],
 .system-chart__toggle[data-series="cpu"],
 .system-chart__y-label-part[data-series="cpu"] {
     --series-color: var(--color-series-cpu);
 }
 
 .metric[data-metric="disk"],
+.metric-breakdown[data-metric="disk"],
 .system-chart__toggle[data-series="disk"],
 .system-chart__y-label-part[data-series="disk"] {
     --series-color: var(--color-series-disk);
@@ -1013,12 +1027,14 @@ textarea:focus-visible {
 }
 
 .metric[data-metric="memory"],
+.metric-breakdown[data-metric="memory"],
 .system-chart__toggle[data-series="memory"],
 .system-chart__y-label-part[data-series="memory"] {
     --series-color: var(--color-series-memory);
 }
 
 .metric[data-metric="writes"],
+.metric-breakdown[data-metric="writes"],
 .system-chart__toggle[data-series="writes"],
 .system-chart__y-label-part[data-series="writes"] {
     --series-color: var(--color-series-writes);
@@ -1042,22 +1058,29 @@ textarea:focus-visible {
     outline-offset: 2px;
 }
 
-.writes-breakdown {
+.metric-breakdown {
     margin-top: var(--spacing-md);
     padding: var(--spacing-md);
     background: var(--color-bg-panel);
-    border: 1px solid var(--color-series-writes);
+    border: 1px solid var(--series-color);
     border-radius: var(--radius);
 }
 
-.writes-breakdown__title {
+.metric-breakdown__title {
     margin: 0 0 var(--spacing-sm);
     font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--color-text-muted);
 }
 
-.writes-breakdown__list {
+.metric-breakdown__summary {
+    display: none;
+    margin: calc(-1 * var(--spacing-xs)) 0 var(--spacing-sm);
+    font-size: var(--font-size-xs);
+    color: var(--color-text-secondary);
+}
+
+.metric-breakdown__list {
     margin: 0;
     padding: 0;
     list-style: none;
@@ -1065,34 +1088,40 @@ textarea:focus-visible {
     gap: var(--spacing-sm);
 }
 
-.writes-breakdown__row {
+.metric-breakdown__row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     column-gap: var(--spacing-md);
     font-size: var(--font-size-sm);
 }
 
-.writes-breakdown__name {
+.metric-breakdown__name {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.writes-breakdown__value {
+.metric-breakdown__value {
     color: var(--color-text-secondary);
     font-variant-numeric: tabular-nums;
 }
 
-.writes-breakdown__bar {
+.metric-breakdown__bar {
     grid-column: 1 / -1;
     height: 4px;
     margin-top: var(--spacing-xs);
-    background: var(--color-series-writes);
+    background: var(--series-color);
     border-radius: var(--radius);
     transform-origin: left;
 }
 
-.writes-breakdown__message {
+.metric-breakdown__row--total {
+    padding-bottom: var(--spacing-sm);
+    border-bottom: 1px solid var(--border-color);
+    font-weight: 600;
+}
+
+.metric-breakdown__message {
     color: var(--color-text-muted);
     font-size: var(--font-size-sm);
 }
@@ -1114,6 +1143,10 @@ textarea:focus-visible {
 .metric__label {
     font-size: var(--font-size-xs);
     font-weight: 500;
+}
+
+.metric__label-short {
+    display: none;
 }
 
 .metric__value {

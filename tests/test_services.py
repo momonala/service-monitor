@@ -1,6 +1,7 @@
 """Tests for services.py module."""
 
 import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -15,6 +16,7 @@ from src.services import (
     get_service_status,
     get_services,
     get_system_info,
+    outermost_directories,
     parse_cpu,
     parse_last_error,
     parse_memory,
@@ -139,7 +141,7 @@ def test_get_info_for_service(mock_run):
 def test_get_service_status(mock_get_info):
     """Parse service status for active, failed, and inactive services."""
     mock_get_info.return_value = (
-        "Active: active (running) since Mon; 4 days ago\n" "Memory: 123.4M\n" "CPU: 2min 15.678s\n"
+        "Active: active (running) since Mon; 4 days ago\nMemory: 123.4M\nCPU: 2min 15.678s\n"
     )
     status = get_service_status("projects_test.service")
     assert status.is_active and not status.is_failed
@@ -388,8 +390,10 @@ def test_read_service_metrics_empty_units_skips_subprocess(monkeypatch):
 
 
 def test_read_service_metrics_returns_empty_on_failure(monkeypatch):
-    completed = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="boom")
-    monkeypatch.setattr(services_module.subprocess, "run", lambda *a, **k: completed)
+    def fail(*args, **kwargs):
+        raise subprocess.CalledProcessError(1, args[0], stderr="boom")
+
+    monkeypatch.setattr(services_module.subprocess, "run", fail)
     assert read_service_metrics(["projects_foo.service"]) == {}
 
 
@@ -403,3 +407,8 @@ def test_sum_io_stat_written_bytes_adds_every_device():
 
 def test_sum_io_stat_written_bytes_empty_file():
     assert sum_io_stat_written_bytes("") == 0
+
+
+def test_outermost_directories_drops_nested_paths():
+    dirs = {Path("/home/a"), Path("/home/a/raw"), Path("/home/b")}
+    assert outermost_directories(dirs) == {Path("/home/a"), Path("/home/b")}

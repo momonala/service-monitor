@@ -432,3 +432,22 @@ def test_index_home_omits_dashboard_title(mock_is_linux, client):
     assert 'id="systemHeading"' not in html
     assert 'id="systemMetricsChart"' in html
     assert 'id="systemChart"' in html
+
+
+@pytest.mark.parametrize("metric", ["cpu", "memory", "disk", "writes"])
+def test_system_info_by_project_returns_ranked_projects(client, metric, monkeypatch):
+    """GET /api/system-info/by-project/<metric> returns per-project values and a total off-Pi."""
+    monkeypatch.setattr("src.system_metrics.is_linux", lambda: False)
+    monkeypatch.setattr("src.system_metrics._project_sizes_cache", None)
+    response = client.get(f"/api/system-info/by-project/{metric}")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["metric"] == metric
+    values = [p["value"] for p in data["projects"]]
+    assert values == sorted(values, reverse=True)
+    assert data["total"] == pytest.approx(sum(values), abs=0.1 * max(1, len(values)))
+
+
+def test_system_info_by_project_rejects_temperature(client):
+    response = client.get("/api/system-info/by-project/temperature")
+    assert response.status_code == 400

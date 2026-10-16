@@ -31,6 +31,12 @@
         return '';
     }
 
+    function labelHtmlFor(tile) {
+        if (!tile.shortLabel) return tile.label;
+        return `<span class="metric__label-full">${tile.label}</span>`
+            + `<span class="metric__label-short">${tile.shortLabel}</span>`;
+    }
+
     /**
      * Build the metric tiles once. Subsequent updates mutate these in place so
      * values change without tearing down the DOM (no flicker, preserved focus).
@@ -45,7 +51,7 @@
             el.innerHTML = `
                 <span class="metric__head">
                     <svg class="metric__icon" aria-hidden="true"><use href="#icon-${tile.icon}"></use></svg>
-                    <span class="metric__label">${tile.label}</span>
+                    <span class="metric__label">${labelHtmlFor(tile)}</span>
                 </span>
                 <span class="metric__value t-digit-group" data-role="value">—</span>
                 ${tile.sub !== false ? '<span class="metric__sub" data-role="sub"></span>' : ''}

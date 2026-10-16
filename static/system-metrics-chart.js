@@ -17,6 +17,13 @@
 
     // Order here drives toggles, Y-label, datasets, and tooltip rows.
     const SERIES = {
+        writes: {
+            key: 'disk_write_mb_min',
+            label: 'Writes',
+            displayLabel: 'Writes (MB/min)',
+            colorVar: '--color-series-writes',
+            hasMax: false,
+        },
         cpu: { key: 'cpu_percent', label: 'CPU', displayLabel: 'CPU %', colorVar: '--color-series-cpu' },
         disk: { key: 'disk_used_pct', label: 'Disk', displayLabel: 'Disk %', colorVar: '--color-series-disk' },
         memory: {
@@ -30,13 +37,6 @@
             label: 'Temp',
             displayLabel: 'Temp (°C)',
             colorVar: '--color-series-temp',
-        },
-        writes: {
-            key: 'disk_write_mb_min',
-            label: 'Writes',
-            displayLabel: 'Writes (MB/min)',
-            colorVar: '--color-series-writes',
-            hasMax: false,
         },
     };
     const SERIES_ORDER = Object.keys(SERIES);
