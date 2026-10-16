@@ -9,7 +9,7 @@
     } = window.SMChartUtils;
 
     const DEFAULT_WINDOW = '7d';
-    const DEFAULT_ROLLUP = '30s';
+    const DEFAULT_ROLLUP = '10m';
     const STORAGE_ROLLUP = 'servicemonitor:system-chart-rollup';
     const SHARED_Y_AXIS = 'y';
     const TOOLTIP_LABEL_W = 10;
@@ -30,6 +30,13 @@
             label: 'Temp',
             displayLabel: 'Temp (°C)',
             colorVar: '--color-series-temp',
+        },
+        writes: {
+            key: 'disk_write_mb_min',
+            label: 'Writes',
+            displayLabel: 'Writes (MB/min)',
+            colorVar: '--color-series-writes',
+            hasMax: false,
         },
     };
     const SERIES_ORDER = Object.keys(SERIES);
@@ -113,11 +120,11 @@
             plugins: [rebootLinePlugin],
             datasets: SERIES_ORDER.flatMap((id) => [
                 buildLineDataset(id, SERIES[id], 'avg'),
-                buildLineDataset(id, SERIES[id], 'max'),
+                ...(SERIES[id].hasMax === false ? [] : [buildLineDataset(id, SERIES[id], 'max')]),
             ]),
             scales: {
                 x: timeScale(theme, () => windowGroup.value),
-                [SHARED_Y_AXIS]: valueScale(theme, { min: 0, max: 100 }),
+                [SHARED_Y_AXIS]: valueScale(theme, { min: 0, suggestedMax: 100 }),
             },
             tooltip: buildTooltip(theme, {
                 filter: (item) => item.dataset.kind === 'avg',

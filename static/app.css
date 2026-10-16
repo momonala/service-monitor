@@ -89,6 +89,7 @@
     --color-series-cpu:    var(--color-accent);
     --color-series-memory: var(--color-status-active);
     --color-series-disk:   #64d2ff;
+    --color-series-writes: #ff9f0a;
     --system-chart-height: 16rem;
 }
 
@@ -908,7 +909,7 @@ textarea:focus-visible {
        selector the skeleton kept the auto-fit columns, wrapped to two rows, and its taller box
        went on dictating the wrap's height long after the real tiles faded in. */
     .metric-grid--system {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(5, minmax(0, 1fr));
     }
 
     .metric-grid--r2 {
@@ -926,6 +927,14 @@ textarea:focus-visible {
 
     .metric-grid .metric__head {
         margin-bottom: var(--spacing-xs);
+    }
+
+    .metric-grid .metric__icon {
+        display: none;
+    }
+
+    .metric-grid--system .metric:not([aria-expanded="true"]) .metric__sub {
+        display: none;
     }
 
     .metric-grid .metric__bar {
@@ -958,10 +967,9 @@ textarea:focus-visible {
     }
 }
 
-/* Only two tiles (cpu/memory) in the wide main content column — compact,
-   no bar, capped width so they don't stretch like the four-tile dashboard grid. */
+/* Compact, no bar, capped width so the tiles don't stretch across the wide main column. */
 .metric-grid--service {
-    grid-template-columns: repeat(2, minmax(0, 9rem));
+    grid-template-columns: repeat(3, minmax(0, 9rem));
 }
 
 .metric-grid--service .metric {
@@ -1010,6 +1018,85 @@ textarea:focus-visible {
     --series-color: var(--color-series-memory);
 }
 
+.metric[data-metric="writes"],
+.system-chart__toggle[data-series="writes"],
+.system-chart__y-label-part[data-series="writes"] {
+    --series-color: var(--color-series-writes);
+}
+
+.metric--button {
+    width: 100%;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.metric--button:hover,
+.metric--button[aria-expanded="true"] {
+    background: var(--color-bg-secondary);
+}
+
+.metric--button:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+}
+
+.writes-breakdown {
+    margin-top: var(--spacing-md);
+    padding: var(--spacing-md);
+    background: var(--color-bg-panel);
+    border: 1px solid var(--color-series-writes);
+    border-radius: var(--radius);
+}
+
+.writes-breakdown__title {
+    margin: 0 0 var(--spacing-sm);
+    font-size: var(--font-size-xs);
+    font-weight: 500;
+    color: var(--color-text-muted);
+}
+
+.writes-breakdown__list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: var(--spacing-sm);
+}
+
+.writes-breakdown__row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: var(--spacing-md);
+    font-size: var(--font-size-sm);
+}
+
+.writes-breakdown__name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.writes-breakdown__value {
+    color: var(--color-text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.writes-breakdown__bar {
+    grid-column: 1 / -1;
+    height: 4px;
+    margin-top: var(--spacing-xs);
+    background: var(--color-series-writes);
+    border-radius: var(--radius);
+    transform-origin: left;
+}
+
+.writes-breakdown__message {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-sm);
+}
+
 .metric__head {
     display: flex;
     align-items: center;
@@ -1030,6 +1117,7 @@ textarea:focus-visible {
 }
 
 .metric__value {
+    display: block;
     font-size: var(--font-size-xl);
     font-weight: 600;
     line-height: 1.2;
@@ -1038,6 +1126,7 @@ textarea:focus-visible {
 }
 
 .metric__sub {
+    display: block;
     font-size: var(--font-size-xs);
     color: var(--color-text-muted);
     min-height: 1em;
@@ -1046,6 +1135,7 @@ textarea:focus-visible {
 }
 
 .metric__bar {
+    display: block;
     height: 4px;
     margin-top: var(--spacing-sm);
     background: var(--color-metric-track);
@@ -1187,6 +1277,24 @@ textarea:focus-visible {
 
 .system-chart__filter {
     display: contents;
+}
+
+.system-chart__series {
+    grid-column: 2;
+}
+
+@media (max-width: 639px) {
+    .system-chart__series {
+        grid-column: 1 / -1;
+        flex-wrap: nowrap;
+    }
+
+    .system-chart__series .system-chart__toggle {
+        flex: 1 1 0;
+        min-width: 0;
+        padding-inline: 0.2rem;
+        font-size: 0.6875rem;
+    }
 }
 
 .system-chart__filter-label {

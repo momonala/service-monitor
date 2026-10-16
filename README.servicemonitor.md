@@ -45,7 +45,7 @@ flowchart LR
 6. Background scheduler checks health every 5 minutes; failed services send Telegram alerts via `send_service_failure_alert` (rate-limited per service: `hourly` / `daily` / `muted`)
 7. Other apps can POST custom Markdown alerts to `/api/alert` (always sends; no auth)
 8. Dashboard home polls `/api/system-info` every 10s for host vitals (temp, CPU, memory, disk, uptime)
-9. A background sampler (`system_metrics.py`) polls host vitals at 1Hz and, on each 30s flush, also samples per-service RAM/CPU (anonymous memory from each unit's cgroup `memory.stat`, CPU from `systemctl show CPUUsageNSec`). Both are persisted to `data/system_metrics.db` (7-day retention). The dashboard history chart reads host series from `/api/system-info/history`; the service-detail view reads per-service series from `/api/services/history`
+9. A background sampler (`system_metrics.py`) polls host vitals at 1Hz and, on each 30s flush, also samples per-service RAM/CPU (anonymous memory from each unit's cgroup `memory.stat`, CPU from `systemctl show CPUUsageNSec`). Both are stored as one tick per 30s via `metrics_store.py`, buffered in memory and written to `data/system_metrics.db` every 5 minutes (7-day retention). The dashboard history chart reads host series from `/api/system-info/history`; the service-detail view reads per-service series from `/api/services/history`
 
 ## Prerequisites
 
@@ -103,7 +103,8 @@ service-monitor/
 │   ├── app.py          # Flask app — all routes and request handling
 │   ├── services.py     # systemd querying, ServiceStatus parsing, CI status
 │   ├── scheduler.py    # Background health check + per-service alert frequency; starts the metrics sampler
-│   ├── system_metrics.py # 1Hz host + 30s per-service metric sampler; SQLite persistence + history queries
+│   ├── system_metrics.py # 1Hz host + 30s per-service metric sampler; history queries and payloads
+│   ├── metrics_store.py  # buffered, time-keyed SQLite storage for the sampler's ticks
 │   ├── backup_status.py # Per-project cloud-backup freshness, read from ~/backup-db-cloudflare-r2's manifest
 │   ├── r2_usage.py     # Cloudflare R2 usage for the current billing month, vs. the free tier
 │   ├── telegram.py     # Shared Telegram transport; service-failure message formatting
@@ -300,8 +301,8 @@ and `local_ip` via stdlib (`os`, `shutil`, `socket`), so they populate cross-pla
 
 ### GET `/api/system-info/history`
 
-Windowed host vitals time series for the dashboard-home chart. Read from `data/system_metrics.db`
-(the `system_samples` table). Off-Pi the route returns a synthetic `canned_history`.
+Windowed host vitals time series for the dashboard-home chart. Read from the metrics store (buffered
+ticks plus `data/system_metrics.db`). Off-Pi the route returns a synthetic `canned_history`.
 
 - `window`: `1h` | `6h` | `24h` | `7d` (default `7d`). `400` for other values.
 - `rollup`: `30s` | `2m` | `10m` | `30m` (default `30s`) — server-side time-bucket averaging. `400` for other values.
@@ -320,7 +321,7 @@ Windowed host vitals time series for the dashboard-home chart. Read from `data/s
 ### GET `/api/services/history`
 
 One service's RAM/CPU time series for the chart in the service-detail view (between the status header
-and the live logs). Read from the `service_samples` table. Off-Pi the route returns synthetic data.
+and the live logs). Read from the metrics store's per-tick `services` JSON. Off-Pi the route returns synthetic data.
 
 - `service` (required): full unit name; on Linux it must be a known `projects_*` unit (`400` otherwise).
 - `window` / `rollup`: same values and defaults as `/api/system-info/history`.
@@ -422,18 +423,16 @@ ServiceStatus
 └── ci_status: str | None  # "success" | "failure" | "error" | None
 ```
 
-Metric time series persisted in `data/system_metrics.db` (SQLite, 7-day retention, pruned on each write):
+Metric time series persisted in `data/system_metrics.db` (SQLite, WAL, 7-day retention, pruned daily).
+Ticks are buffered in memory and written in one transaction every 5 minutes, and on clean shutdown
+(`SIGTERM` exits normally so the `atexit` flush runs). Reads merge the buffer with the table.
 
 ```
-system_samples  (host vitals, one row per 30s window; avg + max of the 1Hz ticks)
-├── ts REAL PRIMARY KEY
+samples  (one row per 30s tick; host avg + max of the 1Hz ticks, plus every service's reading)
+├── ts INTEGER PRIMARY KEY                                                         # epoch seconds
 ├── temperature_c / cpu_percent / memory_used_pct / disk_used_pct           REAL   # window average
-└── temperature_c_max / cpu_percent_max / memory_used_pct_max / disk_used_pct_max  REAL   # window max
-
-service_samples  (per-service vitals, one row per service per 30s window)
-├── (ts REAL, service TEXT)   PRIMARY KEY
-├── memory_used_pct  REAL   # cgroup anonymous memory / MemTotal; null when the memory cgroup is off
-└── cpu_percent      REAL   # CPUUsageNSec delta / interval / core count; null on first sample or after restart
+├── temperature_c_max / cpu_percent_max / memory_used_pct_max / disk_used_pct_max  REAL   # window max
+└── services TEXT   # JSON {"<unit>": [memory_used_pct, cpu_percent]}; either value may be null
 ```
 
 ## Storage / Persistence

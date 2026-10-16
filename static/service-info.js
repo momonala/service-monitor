@@ -1,7 +1,7 @@
 (function() {
     'use strict';
 
-    const { levelFor, formatValue, buildTiles, setTile, showGridError } = window.SMMetricGrid;
+    const { levelFor, formatValue, buildTiles, setTile, showGridError, writesTile } = window.SMMetricGrid;
 
     const REFRESH_INTERVAL = 10000;
     const WARN_PCT = 60;
@@ -10,6 +10,7 @@
     const TILES = [
         { id: 'cpu', icon: 'cpu', label: 'CPU', bar: false },
         { id: 'memory', icon: 'memory', label: 'Memory', bar: false },
+        { id: 'writes', icon: 'activity', label: 'Disk writes', bar: false },
     ];
 
     let timer = null;
@@ -30,6 +31,8 @@
             level: levelFor(info.memory_used_pct, WARN_PCT, CRIT_PCT),
             fill: info.memory_used_pct,
         });
+
+        setTile(container, 'writes', writesTile(info));
     }
 
     async function refresh(container, service) {

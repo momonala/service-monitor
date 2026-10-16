@@ -1,7 +1,9 @@
 (function() {
     'use strict';
 
-    const { levelFor, formatValue, buildTiles, setTile, showGridError } = window.SMMetricGrid;
+    const {
+        levelFor, formatValue, buildTiles, setTile, showGridError, formatMegabytes, writesTile,
+    } = window.SMMetricGrid;
 
     const REFRESH_INTERVAL = 10000;
 
@@ -21,9 +23,11 @@
         { id: 'disk', icon: 'disk', label: 'Disk', bar: true },
         { id: 'temperature', icon: 'thermometer', label: 'Temperature', dualBar: true },
         { id: 'memory', icon: 'memory', label: 'Memory', bar: true },
+        { id: 'writes', icon: 'activity', label: 'Disk writes', bar: false, button: true },
     ];
 
     let ipCopyBound = false;
+    let breakdownRequest = null;
 
     function renderIp(ip) {
         const row = document.getElementById('sidebarIp');
@@ -88,8 +92,75 @@
         return Math.min(100, Math.max(0, ((celsius - TEMP_BAR_MIN_C) / span) * 100));
     }
 
+    function renderBreakdownRow(list, { project, written_mb }, largest) {
+        const row = document.createElement('li');
+        row.className = 'writes-breakdown__row';
+        const name = document.createElement('span');
+        name.className = 'writes-breakdown__name';
+        name.textContent = project;
+        const value = document.createElement('span');
+        value.className = 'writes-breakdown__value';
+        value.textContent = formatMegabytes(written_mb);
+        const bar = document.createElement('span');
+        bar.className = 'writes-breakdown__bar';
+        bar.style.transform = `scaleX(${largest > 0 ? written_mb / largest : 0})`;
+        row.append(name, value, bar);
+        list.appendChild(row);
+    }
+
+    function showBreakdownMessage(list, message) {
+        const row = document.createElement('li');
+        row.className = 'writes-breakdown__message';
+        row.textContent = message;
+        list.replaceChildren(row);
+    }
+
+    async function loadWritesBreakdown(list, signal) {
+        list.setAttribute('aria-busy', 'true');
+        showBreakdownMessage(list, 'Loading…');
+        try {
+            const res = await fetch('/api/system-info/writes-by-project', { signal });
+            if (!res.ok) throw new Error(`writes-by-project ${res.status}`);
+            const { projects } = await res.json();
+            if (!projects.length) {
+                showBreakdownMessage(list, 'No writes recorded yet.');
+                return;
+            }
+            list.replaceChildren();
+            const largest = projects[0].written_mb;
+            projects.forEach((entry) => renderBreakdownRow(list, entry, largest));
+        } catch (err) {
+            if (err.name === 'AbortError') return;
+            console.error('Writes breakdown failed:', err);
+            showBreakdownMessage(list, `Could not load the breakdown — ${err.message}.`);
+        } finally {
+            list.removeAttribute('aria-busy');
+        }
+    }
+
+    function bindWritesBreakdown(container) {
+        const tile = container.querySelector('.metric[data-metric="writes"]');
+        const panel = document.getElementById('writesBreakdown');
+        const list = document.getElementById('writesBreakdownList');
+        if (!tile || !panel || !list) return;
+
+        tile.setAttribute('aria-controls', panel.id);
+        tile.setAttribute('aria-expanded', 'false');
+        tile.addEventListener('click', () => {
+            const open = panel.hidden;
+            panel.hidden = !open;
+            tile.setAttribute('aria-expanded', String(open));
+            breakdownRequest?.abort();
+            breakdownRequest = open ? new AbortController() : null;
+            if (open) loadWritesBreakdown(list, breakdownRequest.signal);
+        });
+    }
+
     function render(container, info) {
-        if (!container.querySelector('.metric')) buildTiles(container, TILES);
+        if (!container.querySelector('.metric')) {
+            buildTiles(container, TILES);
+            bindWritesBreakdown(container);
+        }
         container.removeAttribute('aria-busy');
 
         renderIp(info.local_ip);
@@ -133,6 +204,8 @@
             level: levelFor(info.memory_used_pct, WARN_PCT, CRIT_PCT),
             fill: info.memory_used_pct,
         });
+
+        setTile(container, 'writes', writesTile(info));
     }
 
     async function refresh(container) {

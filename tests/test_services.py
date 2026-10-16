@@ -8,6 +8,7 @@ import pytest
 import src.services as services_module
 from src.canned_info import canned_service_statuses
 from src.services import (
+    ServiceCounters,
     SystemInfo,
     get_ci_status,
     get_info_for_service,
@@ -21,6 +22,7 @@ from src.services import (
     parse_timer_next,
     parse_uptime,
     read_service_metrics,
+    sum_io_stat_written_bytes,
 )
 
 
@@ -349,7 +351,7 @@ def test_get_system_info_returns_dataclass():
 
 
 def test_read_service_metrics_parses_blocks(monkeypatch):
-    """Each unit's block is parsed into (memory_bytes, cpu_nsec); missing cgroup returns None."""
+    """Each unit's block is parsed into ServiceCounters; a missing cgroup leaves cgroup reads None."""
     stdout = (
         "Id=projects_foo.service\nControlGroup=/system.slice/projects_foo.service\nCPUUsageNSec=1500000000\n"
         "\n"
@@ -358,21 +360,23 @@ def test_read_service_metrics_parses_blocks(monkeypatch):
     completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr="")
     monkeypatch.setattr(services_module.subprocess, "run", lambda *a, **k: completed)
     monkeypatch.setattr(services_module, "_read_cgroup_anon", lambda path: 209715200)
+    monkeypatch.setattr(services_module, "_read_cgroup_written_bytes", lambda path: 4096)
     metrics = read_service_metrics(["projects_foo.service", "projects_bar.service"])
-    assert metrics["projects_foo.service"] == (209715200, 1500000000)
-    assert metrics["projects_bar.service"] == (None, 42)  # empty ControlGroup -> None
+    assert metrics["projects_foo.service"] == ServiceCounters(209715200, 1500000000, 4096)
+    assert metrics["projects_bar.service"] == ServiceCounters(None, 42, None)  # empty ControlGroup
 
 
 def test_read_service_metrics_unit_with_no_block_gets_none(monkeypatch):
-    """A unit whose type emits no properties (e.g. some .timer units) reports (None, None), not
+    """A unit whose type emits no properties (e.g. some .timer units) reports empty counters, not
     another unit's data — this is the misattribution regression test."""
     stdout = "Id=projects_bar.service\nControlGroup=/system.slice/projects_bar.service\nCPUUsageNSec=99\n"
     completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr="")
     monkeypatch.setattr(services_module.subprocess, "run", lambda *a, **k: completed)
     monkeypatch.setattr(services_module, "_read_cgroup_anon", lambda path: 1024)
+    monkeypatch.setattr(services_module, "_read_cgroup_written_bytes", lambda path: 7)
     metrics = read_service_metrics(["projects_foo.timer", "projects_bar.service"])
-    assert metrics["projects_foo.timer"] == (None, None)
-    assert metrics["projects_bar.service"] == (1024, 99)
+    assert metrics["projects_foo.timer"] == ServiceCounters()
+    assert metrics["projects_bar.service"] == ServiceCounters(1024, 99, 7)
 
 
 def test_read_service_metrics_empty_units_skips_subprocess(monkeypatch):
@@ -387,3 +391,15 @@ def test_read_service_metrics_returns_empty_on_failure(monkeypatch):
     completed = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="boom")
     monkeypatch.setattr(services_module.subprocess, "run", lambda *a, **k: completed)
     assert read_service_metrics(["projects_foo.service"]) == {}
+
+
+def test_sum_io_stat_written_bytes_adds_every_device():
+    io_stat = (
+        "179:0 rbytes=385024 wbytes=23601152 rios=40 wios=2025 dbytes=0 dios=0\n"
+        "8:0 rbytes=0 wbytes=1000 rios=0 wios=1 dbytes=0 dios=0\n"
+    )
+    assert sum_io_stat_written_bytes(io_stat) == 23602152
+
+
+def test_sum_io_stat_written_bytes_empty_file():
+    assert sum_io_stat_written_bytes("") == 0

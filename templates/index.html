@@ -281,8 +281,7 @@
                         <div class="t-acc-panel-inner">
                         <div class="system-chart__toolbar">
                             <div class="system-chart__filter">
-                                <span class="system-chart__filter-label" id="serviceChartMetricsLabel">Metrics</span>
-                                <div class="system-chart__series" role="group" aria-labelledby="serviceChartMetricsLabel">
+                                <div class="system-chart__series" role="group" aria-label="Metrics">
                                     <button type="button" class="system-chart__toggle is-active" data-series="cpu" aria-pressed="true">CPU</button>
                                     <button type="button" class="system-chart__toggle is-active" data-series="memory" aria-pressed="true">Memory</button>
                                 </div>
@@ -352,19 +351,23 @@
                         <div id="systemMetrics" class="metric-grid metric-grid--system" aria-busy="true" aria-live="polite">
                             <p class="metric-grid__placeholder">Loading system info…</p>
                         </div>
+                        <div class="writes-breakdown" id="writesBreakdown" hidden>
+                            <h3 class="writes-breakdown__title">Disk writes by project, last 24h</h3>
+                            <ol class="writes-breakdown__list" id="writesBreakdownList"></ol>
+                        </div>
                         <div class="system-chart" id="systemChart">
                             <div class="system-chart__body" id="systemChartBody">
                                 <div class="system-chart__toolbar">
                                     <div class="system-chart__filter">
-                                        <span class="system-chart__filter-label" id="systemChartMetricsLabel">Metrics</span>
-                                        <div class="system-chart__series" role="group" aria-labelledby="systemChartMetricsLabel">
+                                        <div class="system-chart__series" role="group" aria-label="Metrics">
                                             <button type="button" class="system-chart__toggle is-active" data-series="cpu" aria-pressed="true">CPU</button>
                                             <button type="button" class="system-chart__toggle is-active" data-series="disk" aria-pressed="true">Disk</button>
                                             <button type="button" class="system-chart__toggle is-active" data-series="temperature" aria-pressed="true">Temp</button>
                                             <button type="button" class="system-chart__toggle is-active" data-series="memory" aria-pressed="true">Memory</button>
+                                            <button type="button" class="system-chart__toggle is-active" data-series="writes" aria-pressed="true">Writes</button>
                                         </div>
                                     </div>
-                                    {{ chart_scale_controls('systemChart', '30s', '7d') }}
+                                    {{ chart_scale_controls('systemChart', '10m', '7d') }}
                                 </div>
                                 <div class="system-chart__canvas-wrap">
                                     <div class="system-chart__y-label" id="systemChartYLabel" aria-hidden="true"></div>

@@ -342,13 +342,22 @@ def _read_cpu_percent() -> float | None:
     return cpu_percent_from_delta(first, second)
 
 
-def read_service_metrics(units: list[str]) -> dict[str, tuple[int | None, int | None]]:
-    """Return {unit: (memory_bytes, cpu_usage_nsec)} for the given units in one systemctl call.
+@dataclass(frozen=True)
+class ServiceCounters:
+    """Raw per-unit readings. Each is None when the cgroup or property is unavailable.
 
     memory_bytes is anonymous memory (heap + stack) from the cgroup's memory.stat, which excludes
-    reclaimable file page cache. CPUUsageNSec is cumulative CPU time in nanoseconds since the unit
-    started. Either value is None when the cgroup or property is unavailable.
+    reclaimable file page cache. cpu_nsec (CPUUsageNSec) and written_bytes (io.stat wbytes, summed
+    over devices) are cumulative since the unit started.
     """
+
+    memory_bytes: int | None = None
+    cpu_nsec: int | None = None
+    written_bytes: int | None = None
+
+
+def read_service_metrics(units: list[str]) -> dict[str, ServiceCounters]:
+    """Return {unit: ServiceCounters} for the given units in one systemctl call."""
     if not units:
         return {}
     result = subprocess.run(
@@ -364,7 +373,7 @@ def read_service_metrics(units: list[str]) -> dict[str, tuple[int | None, int | 
     # doesn't support a requested property (e.g. .timer units have no ControlGroup/CPUUsageNSec on
     # some systemd versions) can emit zero lines for that block, shifting every later block out of
     # argument order. Key each block by its own Id= line instead of trusting position.
-    metrics: dict[str, tuple[int | None, int | None]] = {}
+    metrics: dict[str, ServiceCounters] = {}
     for block in result.stdout.strip().split("\n\n"):
         if not block.strip():
             continue
@@ -376,12 +385,44 @@ def read_service_metrics(units: list[str]) -> dict[str, tuple[int | None, int | 
         if not unit:
             continue
         cgroup = raw_values.get("ControlGroup", "")
-        anon = _read_cgroup_anon(cgroup) if cgroup else None
-        cpu_nsec = _parse_systemd_counter(raw_values.get("CPUUsageNSec", ""))
-        metrics[unit] = (anon, cpu_nsec)
+        metrics[unit] = ServiceCounters(
+            memory_bytes=_read_cgroup_anon(cgroup) if cgroup else None,
+            cpu_nsec=_parse_systemd_counter(raw_values.get("CPUUsageNSec", "")),
+            written_bytes=_read_cgroup_written_bytes(cgroup) if cgroup else None,
+        )
     for unit in units:
-        metrics.setdefault(unit, (None, None))
+        metrics.setdefault(unit, ServiceCounters())
     return metrics
+
+
+def _read_cgroup_written_bytes(cgroup_path: str) -> int | None:
+    """Return bytes written to block devices by a cgroup, from io.stat (summed over devices)."""
+    stat_path = Path("/sys/fs/cgroup") / cgroup_path.lstrip("/") / "io.stat"
+    try:
+        return sum_io_stat_written_bytes(stat_path.read_text())
+    except OSError:
+        return None
+
+
+def sum_io_stat_written_bytes(io_stat: str) -> int:
+    """Sum ``wbytes`` across the per-device lines of a cgroup io.stat file."""
+    total = 0
+    for line in io_stat.splitlines():
+        for field in line.split()[1:]:
+            key, _, value = field.partition("=")
+            if key == "wbytes":
+                total += int(value)
+    return total
+
+
+def read_root_sectors_written() -> int | None:
+    """Return the cumulative 512-byte sectors written to the root filesystem's block device since boot."""
+    try:
+        device = os.stat("/").st_dev
+        fields = Path(f"/sys/dev/block/{os.major(device)}:{os.minor(device)}/stat").read_text().split()
+        return int(fields[6])
+    except (OSError, IndexError, ValueError):
+        return None
 
 
 def _read_cgroup_anon(cgroup_path: str) -> int | None:

@@ -1,7 +1,9 @@
 import json
 import logging
 import queue
+import signal
 import subprocess
+import sys
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -38,10 +40,12 @@ from src.system_metrics import (
     ROLLUPS,
     WINDOWS,
     history_payload,
+    host_writes_payload,
     latest_service_sample_payload,
     latest_service_samples_payload,
     service_history_payload,
     temperature_window_stats,
+    writes_by_project_payload,
 )
 from src.telegram import send_telegram_message
 from src.values import INSPECTOR_DETECTOR_CWD, INSPECTOR_DETECTOR_UV_PATH
@@ -328,7 +332,22 @@ def system_info():
         logger.exception("Failed to compute 24h temperature stats")
         payload["temperature_avg_24h"] = None
         payload["temperature_max_24h"] = None
+    try:
+        payload.update(host_writes_payload())
+    except Exception:
+        logger.exception("Failed to compute 24h disk writes")
+        payload.update(disk_written_mb=None, disk_written_hours=None)
     return jsonify(payload)
+
+
+@app.route("/api/system-info/writes-by-project")
+def system_info_writes_by_project():
+    """Return the last 24h of disk writes per project, largest first."""
+    try:
+        return jsonify(writes_by_project_payload())
+    except Exception:
+        logger.exception("Failed to compute disk writes by project")
+        return jsonify({"error": "failed to compute disk writes by project"}), 500
 
 
 @app.route("/api/system-info/history")
@@ -408,7 +427,15 @@ def index():
     )
 
 
+def _exit_on_sigterm(_signum: int, _frame: object) -> None:
+    # SIGTERM skips atexit, so exit normally to let buffered metrics flush. uv and systemd both deliver
+    # SIGTERM, and a second SystemExit raised mid-flush would abort it, so ignore any repeats.
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    sys.exit(0)
+
+
 def main() -> None:
+    signal.signal(signal.SIGTERM, _exit_on_sigterm)
     start_scheduler()
     app.run(host="0.0.0.0", port=FLASK_PORT, debug=False)
 
