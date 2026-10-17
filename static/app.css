@@ -656,20 +656,6 @@ textarea:focus-visible {
         flex-shrink: 0;
     }
 
-    .mobile-nav-bar__title {
-        font-size: var(--font-size-lg);
-        font-weight: 600;
-        color: var(--color-text-primary);
-        text-decoration: none;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        min-width: 0;
-    }
-
-    .mobile-nav-bar__title:hover {
-        color: var(--color-accent);
-    }
 
     .mobile-hamburger {
         flex-shrink: 0;
