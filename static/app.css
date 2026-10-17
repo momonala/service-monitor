@@ -959,16 +959,6 @@ textarea:focus-visible {
     .metric-grid .metric__value {
         font-size: var(--font-size-sm);
     }
-
-    .content-body {
-        padding-left: var(--spacing-sm);
-        padding-right: var(--spacing-sm);
-    }
-
-    .system-chart {
-        padding-left: var(--spacing-sm);
-        padding-right: var(--spacing-sm);
-    }
 }
 
 /* Compact, no bar, capped width so the tiles don't stretch across the wide main column. */
@@ -1304,16 +1294,22 @@ textarea:focus-visible {
 }
 
 @media (max-width: 639px) {
+    .system-chart {
+        margin-inline: calc(-1 * var(--spacing-xs));
+        padding-inline: var(--spacing-xs);
+    }
+
     .system-chart__series {
         grid-column: 1 / -1;
         flex-wrap: nowrap;
     }
 
     .system-chart__series .system-chart__toggle {
-        flex: 1 1 0;
+        flex: 1 1 auto;
         min-width: 0;
-        padding-inline: 0.2rem;
-        font-size: 0.6875rem;
+        padding-inline: 0.25rem;
+        font-size: clamp(0.5625rem, 2.6vw, 0.6875rem);
+        white-space: nowrap;
     }
 }
 
@@ -1525,6 +1521,12 @@ textarea:focus-visible {
     overflow-y: auto;
     padding: var(--spacing-md);
     -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 639px) {
+    .content-body {
+        padding-inline: var(--spacing-sm);
+    }
 }
 
 .content-body--service-view {
