@@ -1078,10 +1078,36 @@ textarea:focus-visible {
     transform-origin: left;
 }
 
+.metric-breakdown__bar--split {
+    display: flex;
+    overflow: hidden;
+    background: none;
+}
+
+.metric-breakdown__segment {
+    height: 100%;
+}
+
+.metric-breakdown__segment--direct {
+    background: var(--series-color, var(--color-accent));
+}
+
+.metric-breakdown__segment--logs {
+    background: color-mix(in srgb, var(--series-color, var(--color-accent)) 45%, transparent);
+}
+
+.metric-breakdown__bar--other {
+    background: var(--color-text-muted);
+}
+
 .metric-breakdown__row--total {
     padding-bottom: var(--spacing-sm);
     border-bottom: 1px solid var(--border-color);
     font-weight: 600;
+}
+
+.metric-breakdown__row + .metric-breakdown__row--total {
+    margin-top: var(--spacing-sm);
 }
 
 .metric-breakdown__message {

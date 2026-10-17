@@ -1,6 +1,7 @@
 """Tests for system metrics persistence and history API helpers."""
 
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from src.system_metrics import (
     ServiceCpuTracker,
     ServiceSample,
     SystemSample,
+    attribute_log_writes,
     average_ticks,
     canned_history,
     get_history,
@@ -562,6 +564,23 @@ def _breakdown_tick(store: MetricsStore, now: float) -> None:
     store.append(make_tick(_sample(now - 60), services))
 
 
+def _writes_tick(store: MetricsStore, ts: float, host_mb: tuple[float | None, ...]) -> None:
+    disk, journald, system, user = (None if mb is None else mb * 1024 for mb in host_mb)
+    services = [
+        ServiceSample(ts, "projects_small.service", 1.0, 2.0, 1024.0, log_written_kb=512.0),
+        ServiceSample(ts, "projects_big.service", 10.0, 5.0, 3072.0),
+        ServiceSample(ts, "projects_exited.service", None, None, log_written_kb=1024.0),
+    ]
+    host = replace(
+        _sample(ts),
+        disk_written_kb=disk,
+        journald_written_kb=journald,
+        system_slice_written_kb=system,
+        user_slice_written_kb=user,
+    )
+    store.append(make_tick(host, services))
+
+
 @pytest.fixture
 def linux_units(monkeypatch):
     monkeypatch.setattr("src.system_metrics.is_linux", lambda: True)
@@ -571,15 +590,47 @@ def linux_units(monkeypatch):
     )
 
 
-def test_writes_by_project_groups_units_and_sorts_largest_first(metrics_store: MetricsStore, linux_units):
+def test_writes_breakdown_splits_logs_and_counts_only_fully_read_ticks_outside_projects(
+    metrics_store: MetricsStore, linux_units
+):
     now = 1_700_000_000.0
-    _breakdown_tick(metrics_store, now)
+    _writes_tick(metrics_store, now - 7200, (500.0, None, None, None))  # before the slice counters existed
+    metrics_store.flush()
+    _writes_tick(metrics_store, now - 60, (20.0, 4.0, 12.0, 1.0))
 
     assert project_breakdown_payload("writes", now=now, store=metrics_store) == {
         "metric": "writes",
-        "total": 4.0,
-        "projects": [{"project": "big", "value": 3.0}, {"project": "small", "value": 1.0}],
+        "total": 11.0,
+        "projects": [
+            {"project": "big", "value": 6.0, "direct": 6.0, "logs": 0.0},
+            {"project": "small", "value": 3.0, "direct": 2.0, "logs": 1.0},
+            {"project": "exited", "value": 2.0, "direct": 0.0, "logs": 2.0},
+        ],
+        "other_total": 14.5,
+        "other": [
+            {"name": "Kernel / filesystem", "value": 7.0},
+            {"name": "Other system services", "value": 4.0},
+            {"name": "System logs (non-project)", "value": 2.5},
+            {"name": "User sessions", "value": 1.0},
+        ],
     }
+
+
+def test_attribute_log_writes_splits_journald_by_entries_across_project_units():
+    services = [ServiceSample(0.0, "projects_a.service", 1.0, 1.0, 10.0)]
+    entries = {"projects_a.service": 3, "projects_gone.service": 1, "ssh.service": 4, "": 2}
+
+    attributed = attribute_log_writes(services, entries, journald_kb=100.0, ts=0.0)
+
+    assert [(s.service, s.written_kb, s.log_written_kb) for s in attributed] == [
+        ("projects_a.service", 10.0, 30.0),
+        ("projects_gone.service", None, 10.0),
+    ]
+
+
+def test_attribute_log_writes_without_a_journald_reading_leaves_services_alone():
+    services = [ServiceSample(0.0, "projects_a.service", 1.0, 1.0, 10.0)]
+    assert attribute_log_writes(services, {"projects_a.service": 3}, journald_kb=None, ts=0.0) == services
 
 
 def test_cpu_by_project_sums_latest_reading_and_skips_missing(metrics_store: MetricsStore, linux_units):

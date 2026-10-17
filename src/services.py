@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import platform
@@ -401,7 +402,7 @@ def read_service_metrics(units: list[str]) -> dict[str, ServiceCounters]:
         metrics[unit] = ServiceCounters(
             memory_bytes=_read_cgroup_anon(cgroup) if cgroup else None,
             cpu_nsec=_parse_systemd_counter(raw_values.get("CPUUsageNSec", "")),
-            written_bytes=_read_cgroup_written_bytes(cgroup) if cgroup else None,
+            written_bytes=read_cgroup_written_bytes(cgroup) if cgroup else None,
         )
     for unit in units:
         metrics.setdefault(unit, ServiceCounters())
@@ -438,8 +439,11 @@ def read_directory_size_kb(directory: Path) -> int | None:
         return None
 
 
-def _read_cgroup_written_bytes(cgroup_path: str) -> int | None:
-    """Return bytes written to block devices by a cgroup, from io.stat (summed over devices)."""
+def read_cgroup_written_bytes(cgroup_path: str) -> int | None:
+    """Return bytes written to block devices by a cgroup, from io.stat (summed over devices).
+
+    A parent slice keeps counting the writes of children that have since exited.
+    """
     stat_path = Path("/sys/fs/cgroup") / cgroup_path.lstrip("/") / "io.stat"
     try:
         return sum_io_stat_written_bytes(stat_path.read_text())
@@ -456,6 +460,48 @@ def sum_io_stat_written_bytes(io_stat: str) -> int:
             if key == "wbytes":
                 total += int(value)
     return total
+
+
+JOURNALD_CGROUP = "/system.slice/systemd-journald.service"
+SYSTEM_SLICE_CGROUP = "/system.slice"
+USER_SLICE_CGROUP = "/user.slice"
+JOURNALCTL_TIMEOUT_SECONDS = 10
+
+
+def read_journal_entries(
+    after_cursor: str | None, since_ts: float
+) -> tuple[dict[str, int], str | None] | None:
+    """Count journal entries per systemd unit since the cursor (or since ``since_ts`` without one).
+
+    Returns ({unit: entries}, cursor of the last entry read). Entries without a unit are keyed "".
+    The cursor is None when nothing new was logged. Returns None when journalctl failed.
+    """
+    cmd = ["journalctl", "--quiet", "--no-pager", "-o", "json", "--output-fields=_SYSTEMD_UNIT"]
+    cmd.append(f"--after-cursor={after_cursor}" if after_cursor else f"--since=@{int(since_ts)}")
+    try:
+        result = subprocess.run(cmd, text=True, capture_output=True, timeout=JOURNALCTL_TIMEOUT_SECONDS)
+    except (subprocess.TimeoutExpired, OSError):
+        logger.warning("journalctl entry count failed")
+        return None
+    if result.returncode != 0:
+        logger.warning("journalctl entry count failed: %s", result.stderr.strip())
+        return None
+    return parse_journal_entries(result.stdout)
+
+
+def parse_journal_entries(json_lines: str) -> tuple[dict[str, int], str | None]:
+    """Tally ``journalctl -o json`` lines by _SYSTEMD_UNIT, returning the counts and the last cursor."""
+    counts: dict[str, int] = {}
+    cursor = None
+    for line in json_lines.splitlines():
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        unit = entry.get("_SYSTEMD_UNIT") or ""
+        counts[unit] = counts.get(unit, 0) + 1
+        cursor = entry.get("__CURSOR", cursor)
+    return counts, cursor
 
 
 def read_root_sectors_written() -> int | None:

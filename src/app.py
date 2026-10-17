@@ -35,7 +35,7 @@ from src.services import (
     parse_service_name,
 )
 from src.system_metrics import (
-    BREAKDOWNS,
+    BREAKDOWN_METRICS,
     DEFAULT_WINDOW,
     WINDOWS,
     history_payload,
@@ -355,7 +355,7 @@ def system_info():
 @app.route("/api/system-info/by-project/<metric>")
 def system_info_by_project(metric: str):
     """Return one metric (cpu, memory, disk, writes) per project, largest first, with the total."""
-    if metric not in BREAKDOWNS:
+    if metric not in BREAKDOWN_METRICS:
         return jsonify({"error": f"Invalid metric: {metric}"}), 400
     try:
         return jsonify(project_breakdown_payload(metric))

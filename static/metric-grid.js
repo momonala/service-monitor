@@ -140,19 +140,56 @@
         return row;
     }
 
-    function renderBreakdown(list, { projects, total }, format) {
-        const totalRow = breakdownRow('All projects', format(total));
-        totalRow.classList.add('metric-breakdown__row--total');
-        const largest = projects[0].value;
-        const projectRows = projects.map(({ project, value }) => {
+    function barSegment(fraction, modifier) {
+        const segment = document.createElement('span');
+        segment.className = `metric-breakdown__segment metric-breakdown__segment--${modifier}`;
+        segment.style.width = `${fraction * 100}%`;
+        return segment;
+    }
+
+    // Writes rows split into the project's own writes and the journald writes for its logs.
+    function splitBar(direct, logs, largest) {
+        const bar = document.createElement('span');
+        bar.className = 'metric-breakdown__bar metric-breakdown__bar--split';
+        bar.append(barSegment(direct / largest, 'direct'), barSegment(logs / largest, 'logs'));
+        return bar;
+    }
+
+    function scaledBar(value, largest, modifier) {
+        const bar = document.createElement('span');
+        bar.className = modifier ? `metric-breakdown__bar metric-breakdown__bar--${modifier}` : 'metric-breakdown__bar';
+        bar.style.transform = `scaleX(${value / largest})`;
+        return bar;
+    }
+
+    function totalRow(name, value) {
+        const row = breakdownRow(name, value);
+        row.classList.add('metric-breakdown__row--total');
+        return row;
+    }
+
+    function renderBreakdown(list, { projects, total, other = [], other_total: otherTotal }, format) {
+        const largest = Math.max(...projects.map((p) => p.value), ...other.map((o) => o.value)) || 1;
+        const projectRows = projects.map(({ project, value, direct, logs }) => {
             const row = breakdownRow(project, format(value));
-            const bar = document.createElement('span');
-            bar.className = 'metric-breakdown__bar';
-            bar.style.transform = `scaleX(${largest > 0 ? value / largest : 0})`;
-            row.appendChild(bar);
+            if (logs !== undefined) {
+                row.title = `${format(direct)} written directly, ${format(logs)} in logs`;
+                row.appendChild(splitBar(direct, logs, largest));
+            } else {
+                row.appendChild(scaledBar(value, largest));
+            }
             return row;
         });
-        list.replaceChildren(totalRow, ...projectRows);
+        const otherRows = other.map(({ name, value }) => {
+            const row = breakdownRow(name, format(value));
+            row.appendChild(scaledBar(value, largest, 'other'));
+            return row;
+        });
+        list.replaceChildren(
+            totalRow('All projects', format(total)),
+            ...projectRows,
+            ...(other.length ? [totalRow('Outside projects', format(otherTotal)), ...otherRows] : []),
+        );
     }
 
     function showBreakdownMessage(list, message) {

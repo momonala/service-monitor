@@ -362,7 +362,7 @@ def test_read_service_metrics_parses_blocks(monkeypatch):
     completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr="")
     monkeypatch.setattr(services_module.subprocess, "run", lambda *a, **k: completed)
     monkeypatch.setattr(services_module, "_read_cgroup_anon", lambda path: 209715200)
-    monkeypatch.setattr(services_module, "_read_cgroup_written_bytes", lambda path: 4096)
+    monkeypatch.setattr(services_module, "read_cgroup_written_bytes", lambda path: 4096)
     metrics = read_service_metrics(["projects_foo.service", "projects_bar.service"])
     assert metrics["projects_foo.service"] == ServiceCounters(209715200, 1500000000, 4096)
     assert metrics["projects_bar.service"] == ServiceCounters(None, 42, None)  # empty ControlGroup
@@ -375,7 +375,7 @@ def test_read_service_metrics_unit_with_no_block_gets_none(monkeypatch):
     completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr="")
     monkeypatch.setattr(services_module.subprocess, "run", lambda *a, **k: completed)
     monkeypatch.setattr(services_module, "_read_cgroup_anon", lambda path: 1024)
-    monkeypatch.setattr(services_module, "_read_cgroup_written_bytes", lambda path: 7)
+    monkeypatch.setattr(services_module, "read_cgroup_written_bytes", lambda path: 7)
     metrics = read_service_metrics(["projects_foo.timer", "projects_bar.service"])
     assert metrics["projects_foo.timer"] == ServiceCounters()
     assert metrics["projects_bar.service"] == ServiceCounters(1024, 99, 7)
@@ -412,3 +412,21 @@ def test_sum_io_stat_written_bytes_empty_file():
 def test_outermost_directories_drops_nested_paths():
     dirs = {Path("/home/a"), Path("/home/a/raw"), Path("/home/b")}
     assert outermost_directories(dirs) == {Path("/home/a"), Path("/home/b")}
+
+
+def test_parse_journal_entries_counts_per_unit_and_keeps_the_last_cursor():
+    lines = "\n".join(
+        [
+            '{"__CURSOR":"c1","_SYSTEMD_UNIT":"projects_a.service"}',
+            '{"__CURSOR":"c2","_SYSTEMD_UNIT":"projects_a.service"}',
+            '{"__CURSOR":"c3"}',
+            "not json",
+        ]
+    )
+    assert services_module.parse_journal_entries(lines) == ({"projects_a.service": 2, "": 1}, "c3")
+
+
+def test_read_journal_entries_reports_a_failed_journalctl_as_none(monkeypatch):
+    failed = subprocess.CompletedProcess([], returncode=1, stdout="", stderr="Failed to seek to cursor")
+    monkeypatch.setattr(services_module.subprocess, "run", lambda *args, **kwargs: failed)
+    assert services_module.read_journal_entries("stale", since_ts=0.0) is None

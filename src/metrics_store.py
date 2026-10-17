@@ -32,6 +32,15 @@ _HOST_COLUMNS = (
     "memory_used_pct_max",
     "disk_used_pct_max",
     "disk_written_kb",
+    "journald_written_kb",
+    "system_slice_written_kb",
+    "user_slice_written_kb",
+)
+_WRITE_SOURCE_COLUMNS = (
+    "disk_written_kb",
+    "journald_written_kb",
+    "system_slice_written_kb",
+    "user_slice_written_kb",
 )
 
 
@@ -47,6 +56,9 @@ class SystemSample:
     memory_used_pct_max: float | None = None
     disk_used_pct_max: float | None = None
     disk_written_kb: float | None = None
+    journald_written_kb: float | None = None
+    system_slice_written_kb: float | None = None
+    user_slice_written_kb: float | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +70,7 @@ class ServiceSample:
     memory_used_pct: float | None
     cpu_percent: float | None
     written_kb: float | None = None
+    log_written_kb: float | None = None
 
 
 class ServiceReading(NamedTuple):
@@ -66,6 +79,7 @@ class ServiceReading(NamedTuple):
     memory_used_pct: float | None
     cpu_percent: float | None
     written_kb: float | None = None
+    log_written_kb: float | None = None
 
 
 @dataclass(frozen=True)
@@ -84,7 +98,8 @@ def make_tick(system: SystemSample, services: list[ServiceSample]) -> Tick:
     return Tick(
         system=system,
         services={
-            s.service: ServiceReading(s.memory_used_pct, s.cpu_percent, s.written_kb) for s in services
+            s.service: ServiceReading(s.memory_used_pct, s.cpu_percent, s.written_kb, s.log_written_kb)
+            for s in services
         },
     )
 
@@ -199,6 +214,42 @@ class MetricsStore:
             ]
         return _combine_totals(total, first, buffered)
 
+    def written_kb_by_source(self, start: float, end: float) -> dict[str, float]:
+        """Total KB per write source, summed only over ticks where every host counter has a reading.
+
+        Keys are the host write columns plus ``services_written_kb`` and ``services_log_written_kb``
+        (all services' direct and journald writes in those same ticks). Summing each over its own
+        ticks would let one with longer history, or a missed read, skew the differences between them.
+        """
+        not_null = " AND ".join(f"{column} IS NOT NULL" for column in _WRITE_SOURCE_COLUMNS)
+        sums = ", ".join(f"COALESCE(SUM({column}), 0)" for column in _WRITE_SOURCE_COLUMNS)
+        services_sum = "COALESCE(SUM((SELECT SUM(json_extract(value, '$[{}]')) FROM json_each(services))), 0)"
+        keys = (*_WRITE_SOURCE_COLUMNS, "services_written_kb", "services_log_written_kb")
+        with self._lock:
+            stored = (
+                self._connection()
+                .execute(
+                    f"SELECT {sums}, {services_sum.format(2)}, {services_sum.format(3)} "
+                    f"FROM samples WHERE ts >= ? AND ts <= ? AND {not_null}",
+                    (start, end),
+                )
+                .fetchone()
+            )
+            totals = dict(zip(keys, stored, strict=True))
+            for tick in self._buffer:
+                host = [getattr(tick.system, column) for column in _WRITE_SOURCE_COLUMNS]
+                if not start <= tick.ts <= end or None in host:
+                    continue
+                readings = tick.services.values()
+                values = (
+                    *host,
+                    sum(r.written_kb or 0.0 for r in readings),
+                    sum(r.log_written_kb or 0.0 for r in readings),
+                )
+                for key, value in zip(keys, values, strict=True):
+                    totals[key] += value
+        return totals
+
     def service_written_kb(self, service: str, start: float, end: float) -> tuple[float, float | None]:
         """Total KB one service wrote in the window, and the first tick that has a reading."""
         path = f"{_json_path(service)}[2]"
@@ -223,15 +274,23 @@ class MetricsStore:
 
     def written_kb_by_service(self, start: float, end: float) -> dict[str, float]:
         """Total KB each service wrote in the window."""
+        return self._sum_by_service("written_kb", start, end)
+
+    def log_written_kb_by_service(self, start: float, end: float) -> dict[str, float]:
+        """Total KB of journald writes attributed to each service in the window."""
+        return self._sum_by_service("log_written_kb", start, end)
+
+    def _sum_by_service(self, field: str, start: float, end: float) -> dict[str, float]:
+        path = f"$[{ServiceReading._fields.index(field)}]"
         with self._lock:
             rows = (
                 self._connection()
                 .execute(
-                    "SELECT entry.key, SUM(json_extract(entry.value, '$[2]')) "
+                    "SELECT entry.key, SUM(json_extract(entry.value, ?)) "
                     "FROM samples, json_each(samples.services) AS entry "
-                    "WHERE ts >= ? AND ts <= ? AND json_extract(entry.value, '$[2]') IS NOT NULL "
+                    "WHERE ts >= ? AND ts <= ? AND json_extract(entry.value, ?) IS NOT NULL "
                     "GROUP BY entry.key",
-                    (start, end),
+                    (path, start, end, path),
                 )
                 .fetchall()
             )
@@ -240,8 +299,9 @@ class MetricsStore:
                 if not start <= tick.ts <= end:
                     continue
                 for service, reading in tick.services.items():
-                    if reading.written_kb is not None:
-                        totals[service] = totals.get(service, 0.0) + reading.written_kb
+                    value = getattr(reading, field)
+                    if value is not None:
+                        totals[service] = totals.get(service, 0.0) + value
         return totals
 
     def close(self) -> None:
@@ -328,7 +388,7 @@ def _row(tick: Tick) -> tuple:
 
 
 def _service_reading(values: list) -> ServiceReading:
-    """Rows written before per-service writes were tracked hold only [memory, cpu]."""
+    """Older rows hold only [memory, cpu] or [memory, cpu, written]."""
     return ServiceReading(*values)
 
 

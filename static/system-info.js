@@ -35,7 +35,7 @@
             format: formatMegabytes,
             loadingMessage: 'Measuring project directories…',
         },
-        writes: { title: 'Disk writes by project, last 24h', format: formatMegabytes },
+        writes: { title: 'Disk writes, last 24h', format: formatMegabytes },
     };
 
     let ipCopyBound = false;

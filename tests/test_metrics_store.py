@@ -64,7 +64,7 @@ def test_ticks_survive_a_restart(db_path: Path):
 
     assert latest is not None
     assert latest.ts == NOW - 30
-    assert latest.services == {"a.service": (1.0, 2.0, None), "b.service": (3.0, None, None)}
+    assert latest.services == {"a.service": (1.0, 2.0, None, None), "b.service": (3.0, None, None, None)}
     reopened.close()
 
 
@@ -140,5 +140,5 @@ def test_opening_an_older_samples_table_adds_the_written_column(db_path: Path):
     latest = store.latest_tick()
 
     assert latest.system.disk_written_kb is None
-    assert latest.services == {"a.service": (1.0, 2.0, None)}
+    assert latest.services == {"a.service": (1.0, 2.0, None, None)}
     store.close()

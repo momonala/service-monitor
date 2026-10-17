@@ -18,6 +18,9 @@ from pathlib import Path
 
 from src.metrics_store import RETENTION_SECONDS, MetricsStore, ServiceSample, SystemSample, make_tick
 from src.services import (
+    JOURNALD_CGROUP,
+    SYSTEM_SLICE_CGROUP,
+    USER_SLICE_CGROUP,
     SystemInfo,
     _read_cpu_temperature,
     _read_memory,
@@ -27,7 +30,9 @@ from src.services import (
     is_linux,
     outermost_directories,
     parse_service_name,
+    read_cgroup_written_bytes,
     read_directory_size_kb,
+    read_journal_entries,
     read_root_sectors_written,
     read_service_metrics,
     read_total_memory_bytes,
@@ -287,6 +292,46 @@ def sample_services(
     return samples
 
 
+class JournalEntryTracker:
+    """Count journal entries per unit between consecutive samples, resuming from the last cursor."""
+
+    def __init__(self) -> None:
+        self._cursor: str | None = None
+
+    def read(self, ts: float) -> dict[str, int]:
+        """Entries per unit since the last read. A failed read drops the cursor so the next one starts fresh."""
+        result = read_journal_entries(self._cursor, since_ts=ts - SAMPLE_INTERVAL_SECONDS)
+        if result is None:
+            self._cursor = None
+            return {}
+        counts, cursor = result
+        if cursor is not None:
+            self._cursor = cursor
+        return counts
+
+
+def attribute_log_writes(
+    services: list[ServiceSample], entries: dict[str, int], journald_kb: float | None, ts: float
+) -> list[ServiceSample]:
+    """Split journald's written KB across project units in proportion to the entries each logged.
+
+    Project units that logged but aren't in ``services`` (e.g. a oneshot that already exited) get a
+    sample of their own with only the log share set. Non-project entries keep the rest unattributed.
+    """
+    total_entries = sum(entries.values())
+    if journald_kb is None or not total_entries:
+        return services
+    shares = {
+        unit: round(journald_kb * count / total_entries, 1)
+        for unit, count in entries.items()
+        if unit.startswith("projects_")
+    }
+    attributed = [replace(s, log_written_kb=shares.pop(s.service, 0.0)) for s in services]
+    return attributed + [
+        ServiceSample(ts, unit, None, None, log_written_kb=kb) for unit, kb in sorted(shares.items())
+    ]
+
+
 class MetricsAggregator:
     """Accumulate 1Hz ticks and emit one avg+max sample every SAMPLE_INTERVAL_SECONDS."""
 
@@ -320,6 +365,7 @@ def metrics_sampler_loop(
     service_cpu_tracker = ServiceCpuTracker()
     service_write_tracker = CounterDeltaTracker()
     host_write_tracker = CounterDeltaTracker()
+    journal_tracker = JournalEntryTracker()
     cpu_count = os.cpu_count()
     total_memory_bytes = read_total_memory_bytes()
     logger.info(
@@ -332,7 +378,20 @@ def metrics_sampler_loop(
             sample = aggregator.add_tick(read_metrics_tick(cpu_tracker))
             if sample is not None:
                 sectors = host_write_tracker.delta("root", read_root_sectors_written())
-                sample = replace(sample, disk_written_kb=_kb(None if sectors is None else sectors * 512))
+                journald_kb = _kb(
+                    host_write_tracker.delta("journald", read_cgroup_written_bytes(JOURNALD_CGROUP))
+                )
+                sample = replace(
+                    sample,
+                    disk_written_kb=_kb(None if sectors is None else sectors * 512),
+                    journald_written_kb=journald_kb,
+                    system_slice_written_kb=_kb(
+                        host_write_tracker.delta("system", read_cgroup_written_bytes(SYSTEM_SLICE_CGROUP))
+                    ),
+                    user_slice_written_kb=_kb(
+                        host_write_tracker.delta("user", read_cgroup_written_bytes(USER_SLICE_CGROUP))
+                    ),
+                )
                 services = sample_services(
                     get_services(),
                     service_cpu_tracker,
@@ -340,6 +399,9 @@ def metrics_sampler_loop(
                     cpu_count,
                     total_memory_bytes,
                     ts=sample.ts,
+                )
+                services = attribute_log_writes(
+                    services, journal_tracker.read(sample.ts), journald_kb, sample.ts
                 )
                 store.append(make_tick(sample, services))
         except Exception:
@@ -679,13 +741,75 @@ def _memory_mb_by_project(now: float, store: MetricsStore | None) -> dict[str, f
     return {project: pct / 100 * total_mb for project, pct in memory_pct.items()}
 
 
-def _written_mb_by_project(now: float, store: MetricsStore | None) -> dict[str, float]:
+def _written_mb_split_by_project(
+    now: float, store: MetricsStore | None
+) -> tuple[dict[str, float], dict[str, float]]:
+    """MB each project wrote over the window: (its own writes, journald writes for its logs)."""
     if is_linux():
         start = now - window_seconds(WRITES_WINDOW)
-        written_kb = (store or default_store()).written_kb_by_service(start, now)
+        store = store or default_store()
+        direct_kb = store.written_kb_by_service(start, now)
+        log_kb = store.log_written_kb_by_service(start, now)
     else:
-        written_kb = {unit: _canned_written_mb(unit) * 1024 for unit in get_services()}
-    return {project: kb / 1024 for project, kb in _sum_by_project(written_kb).items()}
+        direct_kb = {unit: _canned_written_mb(unit) * 1024 for unit in get_services()}
+        log_kb = {unit: _canned_written_mb(unit) * 512 for unit in get_services()}
+    to_mb = lambda by_unit: {project: kb / 1024 for project, kb in _sum_by_project(by_unit).items()}  # noqa: E731
+    return to_mb(direct_kb), to_mb(log_kb)
+
+
+def _written_mb_outside_projects(now: float, store: MetricsStore | None) -> dict[str, float]:
+    """Writes no project accounts for, by source. The subtracted rows are clamped at zero.
+
+    The root-disk counter and the cgroup counters measure at different layers, so the
+    subtractions are estimates rather than exact remainders.
+    """
+    if is_linux():
+        totals_kb = (store or default_store()).written_kb_by_source(now - window_seconds(WRITES_WINDOW), now)
+        disk, journald, system, user, projects, project_logs = (
+            totals_kb[key] / 1024
+            for key in (
+                "disk_written_kb",
+                "journald_written_kb",
+                "system_slice_written_kb",
+                "user_slice_written_kb",
+                "services_written_kb",
+                "services_log_written_kb",
+            )
+        )
+    else:
+        disk, journald, system, user, projects, project_logs = 3480.0, 900.0, 2400.0, 80.0, 900.0, 450.0
+    return {
+        "System logs (non-project)": max(0.0, journald - project_logs),
+        "Other system services": max(0.0, system - journald - projects),
+        "User sessions": user,
+        "Kernel / filesystem": max(0.0, disk - system - user),
+    }
+
+
+def writes_breakdown_payload(now: float | None = None, store: MetricsStore | None = None) -> dict:
+    """Project writes split into direct and log writes, plus the writes outside any project."""
+    end = time.time() if now is None else now
+    direct, logs = _written_mb_split_by_project(end, store)
+    projects = {
+        project: direct.get(project, 0.0) + logs.get(project, 0.0) for project in direct.keys() | logs.keys()
+    }
+    ranked = sorted(projects.items(), key=lambda item: (-item[1], item[0]))
+    other = sorted(_written_mb_outside_projects(end, store).items(), key=lambda item: -item[1])
+    return {
+        "metric": "writes",
+        "total": round(sum(projects.values()), 1),
+        "projects": [
+            {
+                "project": project,
+                "value": round(value, 1),
+                "direct": round(direct.get(project, 0.0), 1),
+                "logs": round(logs.get(project, 0.0), 1),
+            }
+            for project, value in ranked
+        ],
+        "other_total": round(sum(value for _, value in other), 1),
+        "other": [{"name": name, "value": round(value, 1)} for name, value in other],
+    }
 
 
 def _measure_project_sizes_kb() -> dict[str, float]:
@@ -719,8 +843,8 @@ BREAKDOWNS: dict[str, Callable[[float, MetricsStore | None], dict[str, float]]] 
     "cpu": _cpu_percent_by_project,
     "memory": _memory_mb_by_project,
     "disk": _disk_mb_by_project,
-    "writes": _written_mb_by_project,
 }
+BREAKDOWN_METRICS = (*BREAKDOWNS, "writes")
 
 
 def project_breakdown_payload(
@@ -729,11 +853,14 @@ def project_breakdown_payload(
     """One metric summed per project, largest first, plus the total across projects.
 
     cpu is percent of the host and memory is MB, both from the latest tick; disk is the MB the
-    project's working directories take up; writes is MB written over the last 24h.
+    project's working directories take up; writes is MB written over the last 24h, shaped by
+    writes_breakdown_payload.
 
     Raises:
-        KeyError: metric is not one of BREAKDOWNS.
+        KeyError: metric is not one of BREAKDOWN_METRICS.
     """
+    if metric == "writes":
+        return writes_breakdown_payload(now, store)
     by_project = BREAKDOWNS[metric](time.time() if now is None else now, store)
     ranked = sorted(by_project.items(), key=lambda item: (-item[1], item[0]))
     return {
