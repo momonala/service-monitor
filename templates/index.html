@@ -361,17 +361,16 @@
                                 <div class="system-chart__toolbar">
                                     <div class="system-chart__filter">
                                         <div class="system-chart__series" role="group" aria-label="Metrics">
-                                            <button type="button" class="system-chart__toggle is-active" data-series="writes" aria-pressed="true">Writes</button>
-                                            <button type="button" class="system-chart__toggle is-active" data-series="cpu" aria-pressed="true">CPU</button>
-                                            <button type="button" class="system-chart__toggle is-active" data-series="disk" aria-pressed="true">Disk</button>
-                                            <button type="button" class="system-chart__toggle is-active" data-series="temperature" aria-pressed="true">Temp</button>
-                                            <button type="button" class="system-chart__toggle is-active" data-series="memory" aria-pressed="true">Memory</button>
+                                            <button type="button" class="system-chart__toggle is-active" data-series="writes" aria-pressed="true">Writes (MB/min)</button>
+                                            <button type="button" class="system-chart__toggle is-active" data-series="cpu" aria-pressed="true">CPU (%)</button>
+                                            <button type="button" class="system-chart__toggle is-active" data-series="disk" aria-pressed="true">Disk (%)</button>
+                                            <button type="button" class="system-chart__toggle is-active" data-series="temperature" aria-pressed="true">Temp (°C)</button>
+                                            <button type="button" class="system-chart__toggle is-active" data-series="memory" aria-pressed="true">Memory (%)</button>
                                         </div>
                                     </div>
                                     {{ chart_scale_controls('systemChart', '10m', '7d') }}
                                 </div>
                                 <div class="system-chart__canvas-wrap">
-                                    <div class="system-chart__y-label" id="systemChartYLabel" aria-hidden="true"></div>
                                     <canvas id="systemMetricsChart" aria-label="System metrics over time"></canvas>
                                 </div>
                             </div>

@@ -127,7 +127,6 @@ textarea:focus-visible {
     outline-offset: 1px;
 }
 
-
 .app-container {
     display: flex;
     flex-direction: column;
@@ -758,7 +757,6 @@ textarea:focus-visible {
     transform: rotate(180deg);
 }
 
-
 /* Hide sidebar toggle on mobile (use hamburger instead) */
 .sidebar__toggle {
     display: none;
@@ -864,7 +862,6 @@ textarea:focus-visible {
     opacity: 0.9;
 }
 
-
 .btn--warning {
     background: var(--color-warning);
     color: var(--color-bg-primary);
@@ -879,7 +876,6 @@ textarea:focus-visible {
     transform: scale(0.98);
     opacity: 0.9;
 }
-
 
 /* ============================================
    Dashboard Home (system vitals + sites)
@@ -964,10 +960,6 @@ textarea:focus-visible {
         font-size: var(--font-size-sm);
     }
 
-    .system-chart__y-label {
-        display: none;
-    }
-
     .content-body {
         padding-left: var(--spacing-sm);
         padding-right: var(--spacing-sm);
@@ -1008,35 +1000,30 @@ textarea:focus-visible {
 
 .metric[data-metric="cpu"],
 .metric-breakdown[data-metric="cpu"],
-.system-chart__toggle[data-series="cpu"],
-.system-chart__y-label-part[data-series="cpu"] {
+.system-chart__toggle[data-series="cpu"] {
     --series-color: var(--color-series-cpu);
 }
 
 .metric[data-metric="disk"],
 .metric-breakdown[data-metric="disk"],
-.system-chart__toggle[data-series="disk"],
-.system-chart__y-label-part[data-series="disk"] {
+.system-chart__toggle[data-series="disk"] {
     --series-color: var(--color-series-disk);
 }
 
 .metric[data-metric="temperature"],
-.system-chart__toggle[data-series="temperature"],
-.system-chart__y-label-part[data-series="temperature"] {
+.system-chart__toggle[data-series="temperature"] {
     --series-color: var(--color-series-temp);
 }
 
 .metric[data-metric="memory"],
 .metric-breakdown[data-metric="memory"],
-.system-chart__toggle[data-series="memory"],
-.system-chart__y-label-part[data-series="memory"] {
+.system-chart__toggle[data-series="memory"] {
     --series-color: var(--color-series-memory);
 }
 
 .metric[data-metric="writes"],
 .metric-breakdown[data-metric="writes"],
-.system-chart__toggle[data-series="writes"],
-.system-chart__y-label-part[data-series="writes"] {
+.system-chart__toggle[data-series="writes"] {
     --series-color: var(--color-series-writes);
 }
 
@@ -1411,28 +1398,6 @@ textarea:focus-visible {
     height: 12rem;
 }
 
-.system-chart__y-label {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    justify-content: center;
-    gap: 0.45rem;
-    flex-shrink: 0;
-    writing-mode: vertical-rl;
-    transform: rotate(180deg);
-    font-size: var(--font-size-xs);
-    font-weight: 500;
-    user-select: none;
-}
-
-.system-chart__y-label-part {
-    color: var(--series-color);
-}
-
-.system-chart__y-label-part.is-hidden {
-    display: none;
-}
-
 .system-chart__canvas-wrap canvas {
     flex: 1 1 auto;
     min-width: 0;
@@ -1485,7 +1450,6 @@ textarea:focus-visible {
     flex-shrink: 0;
     margin-left: auto;
 }
-
 
 /* ============================================
    Utilities
@@ -1609,7 +1573,6 @@ textarea:focus-visible {
     background: var(--color-scrollbar-thumb-hover);
 }
 
-
 .status-summary {
     display: flex;
     gap: var(--spacing-md);
@@ -1655,11 +1618,9 @@ textarea:focus-visible {
     border-color: var(--color-accent);
 }
 
-
 .service-item--filtered {
     display: none !important;
 }
-
 
 /* ============================================
    Live Log Stream Panel

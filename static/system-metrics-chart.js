@@ -12,10 +12,10 @@
     const DEFAULT_ROLLUP = '10m';
     const STORAGE_ROLLUP = 'servicemonitor:system-chart-rollup';
     const SHARED_Y_AXIS = 'y';
-    const TOOLTIP_LABEL_W = 10;
+    const TOOLTIP_LABEL_W = 15;
     const TOOLTIP_VALUE_W = 6;
 
-    // Order here drives toggles, Y-label, datasets, and tooltip rows.
+    // Order here drives toggles, datasets, and tooltip rows.
     const SERIES = {
         writes: {
             key: 'disk_write_mb_min',
@@ -24,12 +24,12 @@
             colorVar: '--color-series-writes',
             hasMax: false,
         },
-        cpu: { key: 'cpu_percent', label: 'CPU', displayLabel: 'CPU %', colorVar: '--color-series-cpu' },
-        disk: { key: 'disk_used_pct', label: 'Disk', displayLabel: 'Disk %', colorVar: '--color-series-disk' },
+        cpu: { key: 'cpu_percent', label: 'CPU', displayLabel: 'CPU (%)', colorVar: '--color-series-cpu' },
+        disk: { key: 'disk_used_pct', label: 'Disk', displayLabel: 'Disk (%)', colorVar: '--color-series-disk' },
         memory: {
             key: 'memory_used_pct',
             label: 'Memory',
-            displayLabel: 'Memory %',
+            displayLabel: 'Memory (%)',
             colorVar: '--color-series-memory',
         },
         temperature: {
@@ -132,6 +132,13 @@
                     SERIES_ORDER.indexOf(a.dataset.seriesId) - SERIES_ORDER.indexOf(b.dataset.seriesId),
                 callbacks: {
                     beforeBody: () => tooltipMetricRow('', 'avg', 'max'),
+                    afterBody(items) {
+                        if (!items.length) return [];
+                        const shown = new Set(items.map((item) => item.dataset.seriesId));
+                        return SERIES_ORDER
+                            .filter((id) => visibleSeries[id] && !shown.has(id))
+                            .map((id) => tooltipMetricRow(SERIES[id].displayLabel, null, null));
+                    },
                     label(ctx) {
                         const series = SERIES[ctx.dataset.seriesId];
                         if (ctx.parsed.y == null || !series) return null;
@@ -146,28 +153,8 @@
         });
     }
 
-    function syncYLabel() {
-        const root = document.getElementById('systemChartYLabel');
-        if (!root) return;
-
-        if (!root.childElementCount) {
-            SERIES_ORDER.forEach((id) => {
-                const part = document.createElement('span');
-                part.className = 'system-chart__y-label-part';
-                part.dataset.series = id;
-                part.textContent = SERIES[id].displayLabel;
-                root.appendChild(part);
-            });
-        }
-
-        root.querySelectorAll('[data-series]').forEach((part) => {
-            part.classList.toggle('is-hidden', !visibleSeries[part.dataset.series]);
-        });
-    }
-
     function applySeriesVisibility() {
         if (!chart) return;
-        syncYLabel();
         applyHiddenSeries(chart, visibleSeries);
     }
 
