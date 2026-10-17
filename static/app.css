@@ -1262,12 +1262,6 @@ textarea:focus-visible {
     padding-bottom: var(--spacing-md);
 }
 
-/* Charts without a collapse header (the dashboard's system chart) keep the
-   header gap they used to get from the body's margin. */
-.system-chart__body:not(.t-acc-panel) {
-    margin-top: var(--spacing-md);
-}
-
 .system-chart__toolbar {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -1295,7 +1289,7 @@ textarea:focus-visible {
 @media (max-width: 639px) {
     .system-chart {
         margin-inline: calc(-1 * var(--spacing-xs));
-        padding-inline: var(--spacing-xs);
+        padding: var(--spacing-sm) var(--spacing-xs);
     }
 
     .system-chart__series {
@@ -1504,7 +1498,16 @@ textarea:focus-visible {
 
 @media (max-width: 639px) {
     .content-body {
-        padding-inline: var(--spacing-sm);
+        padding: var(--spacing-sm);
+    }
+
+    .dashboard-home,
+    .dash-section {
+        gap: var(--spacing-sm);
+    }
+
+    .metric-breakdown {
+        margin-top: 0;
     }
 }
 
