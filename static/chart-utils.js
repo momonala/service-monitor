@@ -188,11 +188,21 @@
         };
     }
 
+    // Touch has no pointer-leave, so Chart.js would keep the last tapped point active forever.
+    function dismissTooltipOnOutsideTap(chart) {
+        document.addEventListener('pointerdown', (event) => {
+            if (event.target === chart.canvas || !chart.getActiveElements().length) return;
+            chart.setActiveElements([]);
+            chart.tooltip.setActiveElements([], { x: 0, y: 0 });
+            chart.update('none');
+        });
+    }
+
     function createChart(canvas, { datasets, scales, tooltip, plugins = [] }) {
         if (typeof Chart === 'undefined') {
             throw new Error('Chart.js failed to load');
         }
-        return new Chart(canvas.getContext('2d'), {
+        const chart = new Chart(canvas.getContext('2d'), {
             type: 'line',
             data: { datasets },
             plugins,
@@ -208,6 +218,8 @@
                 scales,
             },
         });
+        dismissTooltipOnOutsideTap(chart);
+        return chart;
     }
 
     /** Load a history payload into every dataset, keyed by each one's `sampleKey`. */
