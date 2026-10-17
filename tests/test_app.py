@@ -432,6 +432,9 @@ def test_system_info_by_project_returns_ranked_projects(client, metric, monkeypa
     """GET /api/system-info/by-project/<metric> returns per-project values and a total off-Pi."""
     monkeypatch.setattr("src.system_metrics.is_linux", lambda: False)
     monkeypatch.setattr("src.system_metrics._project_sizes_cache", None)
+    monkeypatch.setattr(
+        "src.system_metrics.get_services", lambda: ["projects_alpha.service", "projects_beta_worker.service"]
+    )
     response = client.get(f"/api/system-info/by-project/{metric}")
     assert response.status_code == 200
     data = response.get_json()
