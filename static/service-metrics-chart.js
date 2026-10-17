@@ -8,16 +8,14 @@
     'use strict';
 
     const {
-        WINDOWS, ROLLUPS, cssToken, withOpacity, readLocal, writeLocal, chartTheme,
+        WINDOWS, cssToken, withOpacity, readLocal, writeLocal, chartTheme,
         createChoiceGroup, bindSeriesToggles, applyHiddenSeries,
         padCell, formatTooltipValue, timeScale, valueScale,
         buildTooltip, createChart, applySamples, createPoller,
     } = window.SMChartUtils;
 
     const DEFAULT_WINDOW = '24h';
-    const DEFAULT_ROLLUP = '2m';
     const STORAGE_COLLAPSED = 'servicemonitor:service-chart-collapsed';
-    const STORAGE_ROLLUP = 'servicemonitor:service-chart-rollup';
     const SHARED_Y_AXIS = 'y';
     const TOOLTIP_LABEL_W = 8;
     const TOOLTIP_VALUE_W = 8;
@@ -45,7 +43,6 @@
     let service = null;
     let isCollapsed = false;
     let windowGroup = { value: DEFAULT_WINDOW };
-    let rollupGroup = { value: DEFAULT_ROLLUP };
     const visibleSeries = Object.fromEntries(SERIES_ORDER.map((id) => [id, true]));
     const poller = createPoller(refreshChart, 'Service metrics chart');
 
@@ -136,7 +133,6 @@
         const params = new URLSearchParams({
             service,
             window: windowGroup.value,
-            rollup: rollupGroup.value,
         });
         const res = await fetch(`/api/services/history?${params}`);
         if (!res.ok) throw new Error(`service history ${res.status}`);
@@ -158,18 +154,9 @@
             return;
         }
 
-        const savedRollup = readLocal(STORAGE_ROLLUP);
         windowGroup = createChoiceGroup(
             root, '.system-chart__range', 'window', WINDOWS, DEFAULT_WINDOW,
             () => poller.refresh(),
-        );
-        rollupGroup = createChoiceGroup(
-            root, '.system-chart__rollup', 'rollup', ROLLUPS,
-            ROLLUPS.has(savedRollup) ? savedRollup : DEFAULT_ROLLUP,
-            (rollup) => {
-                writeLocal(STORAGE_ROLLUP, rollup);
-                poller.refresh();
-            },
         );
         bindSeriesToggles(root, visibleSeries, () => applyHiddenSeries(chart, visibleSeries));
         root.querySelector('#serviceChartCollapse')?.addEventListener('click', () => {

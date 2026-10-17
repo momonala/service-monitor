@@ -36,9 +36,7 @@ from src.services import (
 )
 from src.system_metrics import (
     BREAKDOWNS,
-    DEFAULT_ROLLUP,
     DEFAULT_WINDOW,
-    ROLLUPS,
     WINDOWS,
     history_payload,
     host_writes_payload,
@@ -75,12 +73,10 @@ def _collect_detailed_statuses(services: list[str]) -> list[ServiceStatus]:
     return _collect_statuses(services, lambda svc: get_service_status(svc, include_ci=True, status_lines=0))
 
 
-def _validate_history_params(window: str, rollup: str) -> str | None:
-    """Return an error message for an unusable window/rollup pair, or None when both are valid."""
+def _validate_window(window: str) -> str | None:
+    """Return an error message for an unknown history window, or None when it is valid."""
     if window not in WINDOWS:
         return f"window must be one of: {', '.join(WINDOWS)}"
-    if rollup not in ROLLUPS:
-        return f"rollup must be one of: {', '.join(ROLLUPS)}"
     return None
 
 
@@ -372,12 +368,11 @@ def system_info_by_project(metric: str):
 def system_info_history():
     """Return windowed host vitals time series for the dashboard chart."""
     window = request.args.get("window", DEFAULT_WINDOW)
-    rollup = request.args.get("rollup", DEFAULT_ROLLUP)
-    error = _validate_history_params(window, rollup)
+    error = _validate_window(window)
     if error:
         return jsonify({"error": error}), 400
     try:
-        return jsonify(history_payload(window=window, rollup=rollup))
+        return jsonify(history_payload(window=window))
     except Exception:
         logger.exception("Failed to load system metrics history")
         return jsonify({"error": "failed to load system metrics history"}), 500
@@ -408,16 +403,15 @@ def service_history():
     """Return one service's RAM/CPU time series for the per-service detail chart."""
     service = request.args.get("service", "").strip()
     window = request.args.get("window", DEFAULT_WINDOW)
-    rollup = request.args.get("rollup", DEFAULT_ROLLUP)
     if not service:
         return jsonify({"error": "service is required"}), 400
     if is_linux() and service not in get_services():
         return jsonify({"error": f"unknown service: {service}"}), 400
-    error = _validate_history_params(window, rollup)
+    error = _validate_window(window)
     if error:
         return jsonify({"error": error}), 400
     try:
-        return jsonify(service_history_payload(service, window=window, rollup=rollup))
+        return jsonify(service_history_payload(service, window=window))
     except Exception:
         logger.exception("Failed to load service metrics history")
         return jsonify({"error": "failed to load service metrics history"}), 500

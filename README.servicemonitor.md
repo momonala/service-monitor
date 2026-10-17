@@ -178,9 +178,9 @@ Secrets and host paths live in `src/values.py` (gitignored). Copy `src/values.py
 | `/api/r2-usage` | GET | JSON: this month's Cloudflare R2 usage vs. the free tier; nulls if no Cloudflare token configured |
 | `/api/r2-usage/by-project/<metric>` | GET | JSON: one R2 metric (`storage`, `class_a`, `class_b`) per project bucket, largest first, with the total |
 | `/api/system-info` | GET | JSON: host (Pi) vitals — temperature, CPU, memory, disk, uptime |
-| `/api/system-info/history` | GET | JSON: windowed host vitals time series for the dashboard chart (`window`, `rollup` params) |
+| `/api/system-info/history` | GET | JSON: windowed host vitals time series for the dashboard chart (`window` param) |
 | `/api/services/current` | GET | JSON: one service's most recent CPU/memory reading, for the live tiles on its detail view (`service` param) |
-| `/api/services/history` | GET | JSON: one service's RAM/CPU time series for the detail-view chart (`service`, `window`, `rollup` params) |
+| `/api/services/history` | GET | JSON: one service's RAM/CPU time series for the detail-view chart (`service`, `window` params) |
 | `/api/alert` | POST | Send a custom Telegram alert (Markdown `message`; no auth/rate limit) |
 | `/api/alert-settings` | GET | Per-service alert frequencies (`hourly` / `daily` / `muted`) |
 | `/api/alert-settings` | POST | Update one service’s alert frequency |
@@ -317,12 +317,11 @@ Windowed host vitals time series for the dashboard-home chart. Read from the met
 ticks plus `data/system_metrics.db`). Off-Pi the route returns a synthetic `canned_history`.
 
 - `window`: `1h` | `6h` | `24h` | `7d` (default `7d`). `400` for other values.
-- `rollup`: `30s` | `2m` | `10m` | `30m` (default `30s`) — server-side time-bucket averaging. `400` for other values.
+- Samples are averaged into fixed buckets per window: `1h` → 30s, `6h` → 2m, `24h` → 30m, `7d` → 1h (`WINDOW_ROLLUP_SECONDS`).
 
 ```json
 {
   "window": "24h",
-  "rollup": "2m",
   "samples": [
     {"ts": 1720000000.0, "temperature_c": 52.6, "cpu_percent": 12.4, "memory_used_pct": 47.3, "disk_used_pct": 38.0,
      "temperature_c_max": 55.1, "cpu_percent_max": 40.2, "memory_used_pct_max": 49.0, "disk_used_pct_max": 38.1}
@@ -336,13 +335,12 @@ One service's RAM/CPU time series for the chart in the service-detail view (betw
 and the live logs). Read from the metrics store's per-tick `services` JSON. Off-Pi the route returns synthetic data.
 
 - `service` (required): full unit name; on Linux it must be a known `projects_*` unit (`400` otherwise).
-- `window` / `rollup`: same values and defaults as `/api/system-info/history`.
+- `window`: same values, default and bucket sizes as `/api/system-info/history`.
 
 ```json
 {
   "service": "projects_foo.service",
   "window": "24h",
-  "rollup": "2m",
   "samples": [
     {"ts": 1720000000.0, "service": "projects_foo.service", "memory_used_pct": 6.1,
      "memory_used_mb": 237, "cpu_percent": 3.2}

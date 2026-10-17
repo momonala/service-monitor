@@ -136,7 +136,7 @@
     }
 
     // ── Tabs sliding (16) ─────────────────────────────────────────────
-    // The rollup / lookback segmented controls. The chart modules flip
+    // The lookback segmented controls. The chart modules flip
     // .is-active via SMChartUtils.createChoiceGroup; movePill re-measures
     // and CSS tweens the pill between the two positions.
 
@@ -172,7 +172,7 @@
     }
 
     function setupTabs() {
-        document.querySelectorAll('.system-chart__ranges, .system-chart__rollups').forEach((bar) => {
+        document.querySelectorAll('.system-chart__ranges').forEach((bar) => {
             bar.classList.add('t-tabs');
             bar.querySelectorAll('button').forEach((btn) => btn.classList.add('t-tab'));
             const pill = document.createElement('span');

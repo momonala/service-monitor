@@ -6,7 +6,6 @@
 
     const REFRESH_INTERVAL = 30000;
     const WINDOWS = new Set(['1h', '6h', '24h', '7d']);
-    const ROLLUPS = new Set(['30s', '2m', '10m', '30m']);
     const AXIS_FONT_SIZE = 11;
     const AXIS_MAX_TICKS = 6;
 
@@ -63,7 +62,7 @@
     }
 
     /**
-     * Wire a segmented control (the rollup / lookback pills) to a single value.
+     * Wire a segmented control (the lookback pills) to a single value.
      * Selecting a new allowed value repaints the pressed state and notifies.
      * @returns {{value: string}} live view of the current selection
      */
@@ -256,7 +255,6 @@
 
     window.SMChartUtils = {
         WINDOWS,
-        ROLLUPS,
         cssToken,
         withOpacity,
         chartTheme,

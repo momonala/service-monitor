@@ -1,16 +1,6 @@
-{% macro chart_scale_controls(prefix, active_rollup, active_window) %}
+{% macro chart_scale_controls(prefix, active_window) %}
 <div class="system-chart__filter">
-    <span class="system-chart__filter-label" id="{{ prefix }}WindowSizeLabel">Rollup</span>
-    <div class="system-chart__rollups" role="group" aria-labelledby="{{ prefix }}WindowSizeLabel">
-        {% for rollup in ['30s', '2m', '10m', '30m'] %}
-        <button type="button" class="system-chart__rollup{{ ' is-active' if rollup == active_rollup }}"
-                data-rollup="{{ rollup }}" aria-pressed="{{ 'true' if rollup == active_rollup else 'false' }}">{{ rollup }}</button>
-        {% endfor %}
-    </div>
-</div>
-<div class="system-chart__filter">
-    <span class="system-chart__filter-label" id="{{ prefix }}LookbackLabel">Lookback</span>
-    <div class="system-chart__ranges" role="group" aria-labelledby="{{ prefix }}LookbackLabel">
+    <div class="system-chart__ranges" role="group" aria-label="Lookback">
         {% for window in ['1h', '6h', '24h', '7d'] %}
         <button type="button" class="system-chart__range{{ ' is-active' if window == active_window }}"
                 data-window="{{ window }}" aria-pressed="{{ 'true' if window == active_window else 'false' }}">{{ window }}</button>
@@ -286,7 +276,7 @@
                                     <button type="button" class="system-chart__toggle is-active" data-series="memory" aria-pressed="true">Memory</button>
                                 </div>
                             </div>
-                            {{ chart_scale_controls('serviceChart', '2m', '24h') }}
+                            {{ chart_scale_controls('serviceChart', '24h') }}
                         </div>
                         <div class="system-chart__canvas-wrap">
                             <canvas id="serviceMetricsChart" aria-label="Service resource usage over time"></canvas>
@@ -368,7 +358,7 @@
                                             <button type="button" class="system-chart__toggle is-active" data-series="memory" aria-pressed="true">Memory (%)</button>
                                         </div>
                                     </div>
-                                    {{ chart_scale_controls('systemChart', '10m', '7d') }}
+                                    {{ chart_scale_controls('systemChart', '7d') }}
                                 </div>
                                 <div class="system-chart__canvas-wrap">
                                     <canvas id="systemMetricsChart" aria-label="System metrics over time"></canvas>

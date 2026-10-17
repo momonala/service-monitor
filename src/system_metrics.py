@@ -50,12 +50,11 @@ WINDOWS: dict[str, int] = {
 }
 WRITES_WINDOW = "24h"
 PROJECT_SIZES_TTL_SECONDS = 30 * 60
-DEFAULT_ROLLUP = "30s"
-ROLLUPS: dict[str, int] = {
-    "30s": 30,
-    "2m": 2 * 60,
-    "10m": 10 * 60,
-    "30m": 30 * 60,
+WINDOW_ROLLUP_SECONDS: dict[str, int] = {
+    "1h": 30,
+    "6h": 2 * 60,
+    "24h": 30 * 60,
+    "7d": 60 * 60,
 }
 
 _sampler_started = False
@@ -101,12 +100,10 @@ def window_seconds(window: str) -> int:
         raise ValueError(f"Invalid window: {window}") from exc
 
 
-def rollup_seconds(rollup: str) -> int:
-    """Resolve a rollup key to seconds. Raises ValueError for unknown rollups."""
-    try:
-        return ROLLUPS[rollup]
-    except KeyError as exc:
-        raise ValueError(f"Invalid rollup: {rollup}") from exc
+def rollup_seconds(window: str) -> int:
+    """Bucket width a window's samples are averaged into. Raises ValueError for unknown windows."""
+    window_seconds(window)
+    return WINDOW_ROLLUP_SECONDS[window]
 
 
 def sample_from_info(info: SystemInfo, ts: float | None = None) -> SystemSample:
@@ -442,14 +439,13 @@ def _aggregate_service_bucket(bucket: list[ServiceSample], ts: float) -> Service
 
 def get_history(
     window: str = DEFAULT_WINDOW,
-    rollup: str = DEFAULT_ROLLUP,
     now: float | None = None,
     store: MetricsStore | None = None,
     max_points: int = MAX_RETURN_POINTS,
 ) -> list[SystemSample]:
     """Return samples in the requested window, rollup-averaged, then capped for charting."""
     span = window_seconds(window)
-    bucket = rollup_seconds(rollup)
+    bucket = rollup_seconds(window)
     end = time.time() if now is None else now
     samples = (store or default_store()).system_samples(end - span, end)
     return _downsample(_rollup_by_time(samples, bucket), max_points=max_points)
@@ -457,12 +453,11 @@ def get_history(
 
 def canned_history(
     window: str = DEFAULT_WINDOW,
-    rollup: str = DEFAULT_ROLLUP,
     now: float | None = None,
 ) -> list[SystemSample]:
     """Synthetic history for off-Pi / dev mode so the chart has something to draw."""
     span = window_seconds(window)
-    bucket = rollup_seconds(rollup)
+    bucket = rollup_seconds(window)
     end = time.time() if now is None else now
     step = max(SAMPLE_INTERVAL_SECONDS, span // 240)
     samples: list[SystemSample] = []
@@ -494,20 +489,13 @@ def canned_history(
 
 def history_payload(
     window: str = DEFAULT_WINDOW,
-    rollup: str = DEFAULT_ROLLUP,
     store: MetricsStore | None = None,
 ) -> dict:
     """JSON-ready history payload for the API."""
     window_seconds(window)  # validate before I/O
-    rollup_seconds(rollup)
-    samples = (
-        get_history(window=window, rollup=rollup, store=store)
-        if is_linux()
-        else canned_history(window=window, rollup=rollup)
-    )
+    samples = get_history(window=window, store=store) if is_linux() else canned_history(window=window)
     return {
         "window": window,
-        "rollup": rollup,
         "samples": [
             {**asdict(sample), "disk_write_mb_min": _write_rate_mb_min(sample)} for sample in samples
         ],
@@ -523,14 +511,13 @@ def _write_rate_mb_min(sample: SystemSample) -> float | None:
 def get_service_history(
     service: str,
     window: str = DEFAULT_WINDOW,
-    rollup: str = DEFAULT_ROLLUP,
     now: float | None = None,
     store: MetricsStore | None = None,
     max_points: int = MAX_RETURN_POINTS,
 ) -> list[ServiceSample]:
     """Return one service's samples in the requested window, rollup-averaged then capped."""
     span = window_seconds(window)
-    bucket = rollup_seconds(rollup)
+    bucket = rollup_seconds(window)
     end = time.time() if now is None else now
     samples = (store or default_store()).service_samples(service, end - span, end)
     rolled = _rollup_by_time(samples, bucket, aggregate=_aggregate_service_bucket)
@@ -582,12 +569,11 @@ def latest_service_samples_payload(services: list[str], store: MetricsStore | No
 def canned_service_history(
     service: str,
     window: str = DEFAULT_WINDOW,
-    rollup: str = DEFAULT_ROLLUP,
     now: float | None = None,
 ) -> list[ServiceSample]:
     """Synthetic per-service history for off-Pi / dev mode so the chart has something to draw."""
     span = window_seconds(window)
-    bucket = rollup_seconds(rollup)
+    bucket = rollup_seconds(window)
     end = time.time() if now is None else now
     step = max(SAMPLE_INTERVAL_SECONDS, span // 240)
     # Vary the shape per service so different services look distinct in dev.
@@ -608,22 +594,19 @@ def canned_service_history(
 def service_history_payload(
     service: str,
     window: str = DEFAULT_WINDOW,
-    rollup: str = DEFAULT_ROLLUP,
     store: MetricsStore | None = None,
 ) -> dict:
     """JSON-ready per-service history payload for the API."""
     window_seconds(window)  # validate before I/O
-    rollup_seconds(rollup)
     samples = (
-        get_service_history(service, window=window, rollup=rollup, store=store)
+        get_service_history(service, window=window, store=store)
         if is_linux()
-        else canned_service_history(service, window=window, rollup=rollup)
+        else canned_service_history(service, window=window)
     )
     total_mb = _total_memory_mb()
     return {
         "service": service,
         "window": window,
-        "rollup": rollup,
         "samples": [
             {**asdict(sample), "memory_used_mb": _memory_mb(sample.memory_used_pct, total_mb)}
             for sample in samples
@@ -681,7 +664,7 @@ def _latest_service_samples_for_breakdown(store: MetricsStore | None) -> list[Se
     services = get_services()
     if is_linux():
         return list(get_latest_service_samples(services, store=store).values())
-    return [canned_service_history(service, window="1h", rollup="30s")[-1] for service in services]
+    return [canned_service_history(service, window="1h")[-1] for service in services]
 
 
 def _cpu_percent_by_project(now: float, store: MetricsStore | None) -> dict[str, float]:
@@ -765,7 +748,7 @@ def latest_service_sample_payload(service: str, store: MetricsStore | None = Non
     if is_linux():
         sample = get_latest_service_samples([service], store=store).get(service)
     else:
-        history = canned_service_history(service, window="1h", rollup="30s")
+        history = canned_service_history(service, window="1h")
         sample = history[-1] if history else None
     total_mb = _total_memory_mb()
     memory_used_pct = sample.memory_used_pct if sample else None

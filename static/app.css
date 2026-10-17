@@ -1270,16 +1270,13 @@ textarea:focus-visible {
 
 .system-chart__toolbar {
     display: grid;
-    grid-template-columns: auto 1fr;
-    align-items: center;
+    grid-template-columns: minmax(0, 1fr);
     row-gap: 0.4rem;
-    column-gap: 0.75rem;
     margin-bottom: var(--spacing-md);
 }
 
 .system-chart__series,
-.system-chart__ranges,
-.system-chart__rollups {
+.system-chart__ranges {
     display: flex;
     flex-wrap: wrap;
     gap: 0.25rem;
@@ -1289,8 +1286,10 @@ textarea:focus-visible {
     display: contents;
 }
 
-.system-chart__series {
-    grid-column: 2;
+.system-chart__series .system-chart__toggle,
+.system-chart__range {
+    flex: 1 1 0;
+    min-width: 0;
 }
 
 @media (max-width: 639px) {
@@ -1300,31 +1299,23 @@ textarea:focus-visible {
     }
 
     .system-chart__series {
-        grid-column: 1 / -1;
         flex-wrap: nowrap;
     }
 
     .system-chart__series .system-chart__toggle {
         flex: 1 1 auto;
-        min-width: 0;
+    }
+
+    .system-chart__series .system-chart__toggle,
+    .system-chart__ranges .system-chart__range {
         padding-inline: 0.25rem;
         font-size: clamp(0.5625rem, 2.6vw, 0.6875rem);
         white-space: nowrap;
     }
 }
 
-.system-chart__filter-label {
-    grid-column: 1;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-xs);
-    font-weight: 500;
-    white-space: nowrap;
-    text-align: right;
-}
-
 .system-chart__toggle,
-.system-chart__range,
-.system-chart__rollup {
+.system-chart__range {
     appearance: none;
     border: 1px solid var(--border-color);
     background: transparent;
@@ -1340,25 +1331,14 @@ textarea:focus-visible {
         border-color var(--transition-fast);
 }
 
-.system-chart__range,
-.system-chart__rollup {
-    box-sizing: border-box;
-    width: 3.25rem;
-    padding-block: 0.4rem;
-    padding-inline: 0;
-    text-align: center;
-}
-
 .system-chart__toggle:hover,
-.system-chart__range:hover,
-.system-chart__rollup:hover {
+.system-chart__range:hover {
     color: var(--color-text-secondary);
     background: var(--color-hover);
 }
 
 .system-chart__toggle:focus-visible,
-.system-chart__range:focus-visible,
-.system-chart__rollup:focus-visible {
+.system-chart__range:focus-visible {
     outline: 2px solid var(--color-accent);
     outline-offset: 2px;
 }
@@ -1369,8 +1349,7 @@ textarea:focus-visible {
     background: var(--color-bg-secondary);
 }
 
-.system-chart__range.is-active,
-.system-chart__rollup.is-active {
+.system-chart__range.is-active {
     color: var(--color-text-primary);
     border-color: var(--border-color-strong);
     background: var(--color-bg-secondary);

@@ -181,9 +181,8 @@ def test_canned_history_has_points_with_max():
 @pytest.mark.parametrize("window", ["1h", "6h", "24h", "7d"])
 def test_history_payload_shape_off_linux(window, monkeypatch):
     monkeypatch.setattr("src.system_metrics.is_linux", lambda: False)
-    payload = history_payload(window=window, rollup="2m")
+    payload = history_payload(window=window)
     assert payload["window"] == window
-    assert payload["rollup"] == "2m"
     assert isinstance(payload["samples"], list)
     assert payload["samples"]
     assert {
@@ -323,13 +322,13 @@ def test_rollup_averages_disk_writes_into_a_per_sample_rate():
     assert _write_rate_mb_min(rolled) == 4.0
 
 
-def test_get_history_applies_rollup(metrics_store: MetricsStore, monkeypatch):
+def test_get_history_applies_window_rollup(metrics_store: MetricsStore, monkeypatch):
     monkeypatch.setattr("src.system_metrics.is_linux", lambda: True)
     now = 1_700_000_120.0
     for offset, temp in ((0, 40), (30, 50), (60, 60), (90, 70)):
         _record(metrics_store, _sample(now - 120 + offset, temp=temp, temp_max=temp + 5))
 
-    samples = get_history(window="1h", rollup="2m", now=now, store=metrics_store)
+    samples = get_history(window="6h", now=now, store=metrics_store)
     assert len(samples) == 2
     assert samples[0].temperature_c == 45.0
     assert samples[0].temperature_c_max == 55.0
@@ -421,15 +420,13 @@ def test_latest_service_samples_payload_shape(metrics_store: MetricsStore, monke
     }
 
 
-def test_get_service_history_applies_rollup(metrics_store: MetricsStore):
+def test_get_service_history_applies_window_rollup(metrics_store: MetricsStore):
     now = 1_700_000_120.0
     for offset, cpu, mem in ((0, 10, 10), (30, 20, 11), (60, 30, 12), (90, 40, 13)):
         _record_services(
             metrics_store, now - 120 + offset, {"projects_foo.service": (float(mem), float(cpu))}
         )
-    samples = get_service_history(
-        "projects_foo.service", window="1h", rollup="2m", now=now, store=metrics_store
-    )
+    samples = get_service_history("projects_foo.service", window="6h", now=now, store=metrics_store)
     assert len(samples) == 2
     assert samples[0].cpu_percent == 15.0
     assert samples[0].memory_used_pct == 10.5
@@ -470,7 +467,7 @@ def test_sample_services_reads_memory_and_cpu(monkeypatch):
 
 def test_service_history_payload_off_linux(monkeypatch):
     monkeypatch.setattr("src.system_metrics.is_linux", lambda: False)
-    payload = service_history_payload("projects_foo.service", window="6h", rollup="2m")
+    payload = service_history_payload("projects_foo.service", window="6h")
     assert payload["service"] == "projects_foo.service"
     assert payload["window"] == "6h"
     assert payload["samples"]

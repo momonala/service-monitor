@@ -360,11 +360,10 @@ def test_send_alert_telegram_failure(mock_send, client):
 @patch("src.system_metrics.is_linux", return_value=False)
 def test_system_info_history_dev_mode(mock_is_linux, client):
     """GET /api/system-info/history returns canned samples off-Pi."""
-    response = client.get("/api/system-info/history?window=1h&rollup=10m")
+    response = client.get("/api/system-info/history?window=1h")
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["window"] == "1h"
-    assert payload["rollup"] == "10m"
     assert len(payload["samples"]) > 0
     assert "temperature_c" in payload["samples"][0]
 
@@ -389,17 +388,11 @@ def test_system_info_history_rejects_bad_window(client):
     assert "window" in response.get_json()["error"]
 
 
-def test_system_info_history_rejects_bad_rollup(client):
-    response = client.get("/api/system-info/history?window=1h&rollup=5m")
-    assert response.status_code == 400
-    assert "rollup" in response.get_json()["error"]
-
-
 @patch("src.app.is_linux", return_value=False)
 @patch("src.system_metrics.is_linux", return_value=False)
 def test_service_history_dev_mode(mock_metrics_linux, mock_app_linux, client):
     """GET /api/services/history returns canned per-service samples off-Pi."""
-    response = client.get("/api/services/history?service=projects_foo.service&window=6h&rollup=2m")
+    response = client.get("/api/services/history?service=projects_foo.service&window=6h")
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["service"] == "projects_foo.service"

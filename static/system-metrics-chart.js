@@ -2,15 +2,13 @@
     'use strict';
 
     const {
-        WINDOWS, ROLLUPS, cssToken, withOpacity, readLocal, writeLocal, chartTheme,
+        WINDOWS, cssToken, withOpacity, chartTheme,
         createChoiceGroup, bindSeriesToggles, applyHiddenSeries,
         padCell, formatTooltipValue, timeScale, valueScale,
         buildTooltip, createChart, applySamples, createPoller,
     } = window.SMChartUtils;
 
     const DEFAULT_WINDOW = '7d';
-    const DEFAULT_ROLLUP = '10m';
-    const STORAGE_ROLLUP = 'servicemonitor:system-chart-rollup';
     const SHARED_Y_AXIS = 'y';
     const TOOLTIP_LABEL_W = 15;
     const TOOLTIP_VALUE_W = 6;
@@ -44,7 +42,6 @@
     let chart = null;
     let bootTimeMs = null;
     let windowGroup = { value: DEFAULT_WINDOW };
-    let rollupGroup = { value: DEFAULT_ROLLUP };
     const visibleSeries = Object.fromEntries(SERIES_ORDER.map((id) => [id, true]));
     const poller = createPoller(refreshChart, 'System metrics chart');
 
@@ -160,7 +157,7 @@
 
     async function refreshChart() {
         if (!chart) return;
-        const params = new URLSearchParams({ window: windowGroup.value, rollup: rollupGroup.value });
+        const params = new URLSearchParams({ window: windowGroup.value });
         const res = await fetch(`/api/system-info/history?${params}`);
         if (!res.ok) throw new Error(`history ${res.status}`);
         const payload = await res.json();
@@ -179,18 +176,9 @@
             return;
         }
 
-        const savedRollup = readLocal(STORAGE_ROLLUP);
         windowGroup = createChoiceGroup(
             root, '.system-chart__range', 'window', WINDOWS, DEFAULT_WINDOW,
             () => poller.refresh(),
-        );
-        rollupGroup = createChoiceGroup(
-            root, '.system-chart__rollup', 'rollup', ROLLUPS,
-            ROLLUPS.has(savedRollup) ? savedRollup : DEFAULT_ROLLUP,
-            (rollup) => {
-                writeLocal(STORAGE_ROLLUP, rollup);
-                poller.refresh();
-            },
         );
         bindSeriesToggles(root, visibleSeries, applySeriesVisibility);
 

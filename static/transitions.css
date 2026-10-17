@@ -642,20 +642,18 @@
     height: var(--status-icon-size);
 }
 
-/* Tabs — the rollup + lookback segmented controls. The snippet's
+/* Tabs — the lookback segmented controls. The snippet's
    own pill geometry (30px / 48px radius / light palette) is
    replaced by the app's compact dark chrome. */
-.system-chart__ranges.t-tabs,
-.system-chart__rollups.t-tabs {
-    display: inline-flex;
+.system-chart__ranges.t-tabs {
+    display: flex;
     flex-wrap: nowrap;
     gap: 0.25rem;
     padding: 0;
     border-radius: var(--radius);
 }
 
-.system-chart__ranges .t-tabs-pill,
-.system-chart__rollups .t-tabs-pill {
+.system-chart__ranges .t-tabs-pill {
     top: 0;
     height: 100%;
     border-radius: var(--radius);
@@ -665,31 +663,26 @@
 
 /* The pill now paints the active background, so the button's own
    .is-active fill would double up. Keep only the text color. */
-.system-chart__ranges .t-tab.is-active,
-.system-chart__rollups .t-tab.is-active {
+.system-chart__ranges .t-tab.is-active {
     background: transparent;
     border-color: transparent;
 }
 
 /* Restore the app's compact button box over the snippet's
    30px / 12px pill sizing. */
-.system-chart__ranges .t-tab,
-.system-chart__rollups .t-tab {
+.system-chart__ranges .t-tab {
     box-sizing: border-box;
-    width: 3.25rem;
     height: auto;
-    padding: 0.4rem 0;
+    padding: 0.3rem 0.55rem;
     border: 1px solid transparent;
     border-radius: var(--radius);
     font-family: inherit;
-    font-size: var(--font-size-xs);
     font-weight: 500;
     letter-spacing: 0.02em;
     text-align: center;
 }
 
-.system-chart__ranges .t-tab:hover,
-.system-chart__rollups .t-tab:hover {
+.system-chart__ranges .t-tab:hover {
     background: transparent;
 }
 
