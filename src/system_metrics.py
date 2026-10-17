@@ -753,7 +753,9 @@ def _written_mb_split_by_project(
     else:
         direct_kb = {unit: _canned_written_mb(unit) * 1024 for unit in get_services()}
         log_kb = {unit: _canned_written_mb(unit) * 512 for unit in get_services()}
-    to_mb = lambda by_unit: {project: kb / 1024 for project, kb in _sum_by_project(by_unit).items()}  # noqa: E731
+    to_mb = lambda by_unit: {
+        project: kb / 1024 for project, kb in _sum_by_project(by_unit).items()
+    }  # noqa: E731
     return to_mb(direct_kb), to_mb(log_kb)
 
 
