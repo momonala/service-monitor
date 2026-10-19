@@ -13,7 +13,7 @@ from pathlib import Path
 
 import requests
 
-from src.values import GITHUB_TOKEN
+from src.env import GITHUB_TOKEN
 
 logger = logging.getLogger(__name__)
 

@@ -2,8 +2,8 @@
 
 import requests
 
+from src.env import TELEGRAM_API_TOKEN, TELEGRAM_CHAT_ID
 from src.services import ServiceStatus
-from src.values import telegram_api_token, telegram_chat_id
 
 TELEGRAM_MAX_MESSAGE_LENGTH = 4096
 # Leave room in the failure template for fields around full_status.
@@ -21,12 +21,12 @@ def send_telegram_message(text: str) -> None:
         raise ValueError("message must be non-empty")
 
     payload = {
-        "chat_id": telegram_chat_id,
+        "chat_id": TELEGRAM_CHAT_ID,
         "text": _fit_telegram_length(text),
         "parse_mode": "Markdown",
     }
     response = requests.post(
-        f"https://api.telegram.org/bot{telegram_api_token}/sendMessage",
+        f"https://api.telegram.org/bot{TELEGRAM_API_TOKEN}/sendMessage",
         data=payload,
     )
     response.raise_for_status()
@@ -43,12 +43,12 @@ def _format_service_failure_alert(service_status: ServiceStatus) -> str:
         _MAX_FULL_STATUS_LENGTH,
     )
     return f"""*Service:* `{_escape_markdown(service_status.name)}`
-*Last Error:* `{_escape_markdown(service_status.last_error or 'N/A')}`
+*Last Error:* `{_escape_markdown(service_status.last_error or "N/A")}`
 *Is Active:* `{service_status.is_active}`
 *Is Failed:* `{service_status.is_failed}`
-*Uptime:* `{_escape_markdown(service_status.uptime or 'N/A')}`
-*Memory:* `{_escape_markdown(service_status.memory or 'N/A')}`
-*CPU:* `{_escape_markdown(service_status.cpu or 'N/A')}`
+*Uptime:* `{_escape_markdown(service_status.uptime or "N/A")}`
+*Memory:* `{_escape_markdown(service_status.memory or "N/A")}`
+*CPU:* `{_escape_markdown(service_status.cpu or "N/A")}`
 
 *Full Status:*
 ```

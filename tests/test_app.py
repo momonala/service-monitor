@@ -7,8 +7,8 @@ import pytest
 from requests import RequestException
 
 from src.app import app
+from src.env import INSPECTOR_DETECTOR_CWD, INSPECTOR_DETECTOR_UV_PATH
 from src.services import ServiceStatus
-from src.values import INSPECTOR_DETECTOR_CWD, INSPECTOR_DETECTOR_UV_PATH
 
 
 @pytest.fixture

@@ -62,10 +62,10 @@ flowchart LR
    cd ~/service-monitor
    ```
 
-2. Copy and fill out the secrets module:
+2. Copy and fill out the env file:
    ```bash
-   cp src/values.py.example src/values.py
-   # Edit src/values.py with your credentials (gitignored)
+   cp .env.example .env
+   # Edit .env with your credentials (gitignored)
    ```
 
 3. Run the install script:
@@ -109,8 +109,7 @@ service-monitor/
 │   ├── r2_usage.py     # Cloudflare R2 usage for the current billing month, vs. the free tier
 │   ├── telegram.py     # Shared Telegram transport; service-failure message formatting
 │   ├── canned_info.py  # Static website links + canned ServiceStatus fixtures for dev/testing
-│   ├── values.py       # Secrets and host paths (gitignored; copy from values.py.example)
-│   ├── values.py.example # Stub secrets used in CI
+│   ├── env.py          # Loads secrets and host paths from .env
 │   └── config.py       # CLI tool that reads pyproject.toml config values
 ├── templates/
 │   └── index.html      # Main dashboard template (Jinja2)
@@ -153,17 +152,17 @@ service-monitor/
 
 ## Secrets
 
-Secrets and host paths live in `src/values.py` (gitignored). Copy `src/values.py.example` and fill in:
+Secrets and host paths live in `.env` (gitignored), loaded by `src/env.py`. Copy `.env.example` and fill in:
 
-| Constant | Required | Description |
+| Variable | Required | Description |
 |---|---|---|
-| `telegram_api_token` | Yes | Telegram bot token for failure + custom alerts |
-| `telegram_chat_id` | Yes | Telegram chat ID to send alerts to |
+| `TELEGRAM_API_TOKEN` | Yes | Telegram bot token for failure + custom alerts |
+| `TELEGRAM_CHAT_ID` | Yes | Telegram chat ID to send alerts to |
 | `GITHUB_TOKEN` | No | GitHub PAT for CI status; unauthenticated rate limit applies if empty |
 | `INSPECTOR_DETECTOR_UV_PATH` | No | Path to `uv` binary on the Pi |
 | `INSPECTOR_DETECTOR_CWD` | No | Working directory for the inspector-detector check |
 | `CLOUDFLARE_ACCOUNT_ID` | No | Cloudflare account ID for R2 usage reporting; `/api/r2-usage` returns nulls if empty |
-| `CLOUDFLARE_API_TOKEN` | No | Cloudflare API token for R2 usage reporting; `/api/r2-usage` returns nulls if empty |
+| `CF_API_TOKEN` | No | Cloudflare API token for R2 usage reporting, read from the environment or `~/.config/cloudflare/creds.env`; `/api/r2-usage` returns nulls if empty |
 
 ## API Endpoints
 
@@ -472,7 +471,7 @@ samples  (one row per 30s tick; host avg + max of the 1Hz ticks, plus every serv
 |---|---|---|
 | systemd | Service management | Local system |
 | Cloudflared | HTTPS tunnel | Cloudflare account |
-| Telegram Bot API | Failure + custom alerts | Bot token in `src/values.py` |
-| GitHub Actions API | CI status badges | PAT in `src/values.py` (optional) |
-| Cloudflare R2 API | Usage reporting | Account ID + API token in `src/values.py` (optional) |
+| Telegram Bot API | Failure + custom alerts | Bot token in `.env` |
+| GitHub Actions API | CI status badges | PAT in `.env` (optional) |
+| Cloudflare R2 API | Usage reporting | Account ID + API token in `.env` (optional) |
 | rclone (`r2:` remote) | Cloud-backup freshness checks | rclone config on the Pi (optional) |

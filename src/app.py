@@ -16,6 +16,7 @@ from requests import RequestException
 from src.backup_status import backup_statuses_for_groups
 from src.canned_info import canned_service_statuses, canned_system_info, websites
 from src.config import FLASK_PORT
+from src.env import INSPECTOR_DETECTOR_CWD, INSPECTOR_DETECTOR_UV_PATH
 from src.r2_usage import R2_BREAKDOWNS, R2UsageSummary, fetch_r2_usage_summary, r2_breakdown_payload
 from src.scheduler import (
     DEFAULT_ALERT_FREQUENCY,
@@ -47,7 +48,6 @@ from src.system_metrics import (
     temperature_window_stats,
 )
 from src.telegram import send_telegram_message
-from src.values import INSPECTOR_DETECTOR_CWD, INSPECTOR_DETECTOR_UV_PATH
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

@@ -30,7 +30,7 @@ websites = [
     {"name": "spyglass", "url": "https://spyglass.mnalavadi.org"},
     {"name": "What's On the Menu?", "url": "https://whats-on-the-menu.mnalavadi.org"},
     {"name": "personal-finances", "url": "https://personal-finances.mnalavadi.org"},
-    {"name": "find-my", "url": "https://find-my.mnalavadi.org"},
+    {"name": "my-cloud", "url": "https://my-cloud.mnalavadi.org"},
 ]
 websites.sort(key=lambda x: x["name"].lower())
 
@@ -40,7 +40,7 @@ canned_service_statuses = [
     ServiceStatus(name='projects_energy-monitor.service', is_active=True, is_failed=False, uptime='1h 58min', memory=None, cpu='7min 52.884s', last_error="Command '['git', 'add', 'data/energy.db.bk']' returned non-zero exit status 128.", full_status='', project_group='energy-monitor', suffix=None, ci_status='success'),
     ServiceStatus(name='projects_energy-monitor_data-backup-scheduler.service', is_active=True, is_failed=False, uptime='1h 58min', memory=None, cpu='17.103s', last_error=None, full_status='', project_group='energy-monitor', suffix='data-backup-scheduler', ci_status=None),
     ServiceStatus(name='projects_energy-monitor_mqtt.service', is_active=True, is_failed=False, uptime='1h 58min', memory=None, cpu='5.185s', last_error=None, full_status='', project_group='energy-monitor', suffix='mqtt', ci_status=None),
-    ServiceStatus(name='projects_find-my.service', is_active=True, is_failed=False, uptime='1h 0min', memory=None, cpu='5.000s', last_error=None, full_status='', project_group='find-my', suffix=None, ci_status='success'),
+    ServiceStatus(name='projects_my-cloud.service', is_active=True, is_failed=False, uptime='1h 0min', memory=None, cpu='5.000s', last_error=None, full_status='', project_group='my-cloud', suffix=None, ci_status='success'),
     ServiceStatus(name='projects_flight-calendar-updater.service', is_active=True, is_failed=False, uptime='2h 15min', memory=None, cpu='5.597s', last_error=None, full_status='', project_group='flight-calendar-updater', suffix=None, ci_status='success'),
     ServiceStatus(name='projects_incognita_dashboard.service', is_active=True, is_failed=False, uptime='1h 58min', memory=None, cpu='5min 15.362s', last_error=None, full_status='', project_group='incognita', suffix='dashboard', ci_status=None),
     ServiceStatus(name='projects_incognita_data-api.service', is_active=True, is_failed=False, uptime='1h 58min', memory=None, cpu='5.185s', last_error=None, full_status='', project_group='incognita', suffix='data-api', ci_status=None),

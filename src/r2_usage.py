@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from src.values import CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN
+from src.env import CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN
 
 logger = logging.getLogger(__name__)
 
