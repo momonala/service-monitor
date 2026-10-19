@@ -60,7 +60,8 @@ def test_hourly_alerts_after_window():
 
 def test_daily_suppresses_within_same_window():
     set_alert_frequency("projects_foo.service", "daily")
-    sched._alerted_services["projects_foo.service"] = datetime.now() - timedelta(hours=1)
+    window_start = sched._alert_period_start(datetime.now())
+    sched._alerted_services["projects_foo.service"] = window_start + timedelta(seconds=1)
     assert _should_alert("projects_foo.service") is False
 
 
