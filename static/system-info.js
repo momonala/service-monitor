@@ -16,7 +16,8 @@
     // Temperature bar maps this Celsius window onto 0–100% fill.
     const TEMP_BAR_MIN_C = 40;
     const TEMP_BAR_MAX_C = 80;
-    const WRITES_BAR_FULL_MB = 20 * 1024;
+    const WARN_WRITES_MB = 2 * 1024;
+    const CRIT_WRITES_MB = 5 * 1024;
 
     // Same order as the history chart series.
     const TILES = [
@@ -156,11 +157,10 @@
             fill: info.memory_used_pct,
         });
 
-        const writesPct = info.disk_written_mb == null ? null : (info.disk_written_mb / WRITES_BAR_FULL_MB) * 100;
         setTile(container, 'writes', {
             ...writesTile(info),
-            level: levelFor(writesPct, WARN_PCT, CRIT_PCT),
-            fill: writesPct,
+            level: levelFor(info.disk_written_mb, WARN_WRITES_MB, CRIT_WRITES_MB),
+            fill: info.disk_written_mb == null ? null : (info.disk_written_mb / CRIT_WRITES_MB) * 100,
         });
         syncBreakdownSummary();
     }
