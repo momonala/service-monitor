@@ -107,6 +107,9 @@
         <symbol id="icon-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
         </symbol>
+        <symbol id="icon-server" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>
+        </symbol>
         <symbol id="icon-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
         </symbol>
@@ -128,16 +131,35 @@
                 <a href="{{ url_for('index') }}" class="sidebar__title">Service Monitor</a>
             </header>
 
+            <!-- Host identity and health -->
+            <div class="sidebar-host" id="sidebarHost" hidden>
+                <div class="sidebar-host__row">
+                    <svg class="sidebar-row__icon" aria-hidden="true"><use href="#icon-server"></use></svg>
+                    <span class="sidebar-host__model" id="sidebarHostModel"></span>
+                </div>
+                <details class="sidebar-health">
+                    <summary class="sidebar-health__toggle">
+                        <span class="sidebar-health__more">Show more</span>
+                        <span class="sidebar-health__less">Show less</span>
+                        <span class="sidebar-health__count" id="sidebarHealthCount" hidden></span>
+                    </summary>
+                    <div class="sidebar-host__line" id="sidebarHostOs"></div>
+                    <div class="sidebar-host__line" id="sidebarHostPython"></div>
+                    <div class="sidebar-host__line" id="sidebarHostCapacity"></div>
+                    <ul class="sidebar-health__list" id="sidebarHealthList" hidden></ul>
+                </details>
+            </div>
+
             <!-- Local IP -->
             <div class="sidebar-ip" id="sidebarIp" hidden>
-                <svg class="sidebar-ip__icon" aria-hidden="true"><use href="#icon-wifi"></use></svg>
+                <svg class="sidebar-row__icon" aria-hidden="true"><use href="#icon-wifi"></use></svg>
                 <span class="sidebar-ip__value" id="sidebarIpValue"></span>
-                <button type="button" class="sidebar-ip__copy" id="sidebarIpCopy" title="Copy IP address">Copy</button>
+                <button type="button" class="sidebar-row-button" id="sidebarIpCopy" title="Copy IP address">Copy</button>
             </div>
 
             <!-- Last reboot -->
             <div class="sidebar-reboot" id="sidebarReboot" hidden>
-                <svg class="sidebar-reboot__icon" aria-hidden="true"><use href="#icon-refresh-cw"></use></svg>
+                <svg class="sidebar-row__icon" aria-hidden="true"><use href="#icon-refresh-cw"></use></svg>
                 <span class="sidebar-reboot__value" id="sidebarRebootValue"></span>
             </div>
 

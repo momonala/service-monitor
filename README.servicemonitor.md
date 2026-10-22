@@ -44,7 +44,7 @@ flowchart LR
 5. Restart commands sent via `sudo systemctl restart`
 6. Background scheduler checks health every 5 minutes; failed services send Telegram alerts via `send_service_failure_alert` (rate-limited per service: `hourly` / `daily` / `muted`)
 7. Other apps can POST custom Markdown alerts to `/api/alert` (always sends; no auth)
-8. Dashboard home polls `/api/system-info` every 10s for host vitals (temp, CPU, memory, disk, uptime)
+8. Dashboard home polls `/api/system-info` every 10s for host vitals (temp, CPU, memory, disk, uptime), plus host identity (model, OS, kernel, Python) and health flags (`vcgencmd get_throttled`, `/var/run/reboot-required`, pending apt upgrades, NTP sync, `cloudflared` status). The scheduler refreshes health every minute; the apt count only runs when you click Check in the sidebar (`POST /api/apt-updates`, `host_info.py`)
 9. A background sampler (`system_metrics.py`) polls host vitals at 1Hz and, on each 30s flush, also samples per-service RAM/CPU (anonymous memory from each unit's cgroup `memory.stat`, CPU from `systemctl show CPUUsageNSec`). Both are stored as one tick per 30s via `metrics_store.py`, buffered in memory and written to `data/system_metrics.db` every 5 minutes (7-day retention). The dashboard history chart reads host series from `/api/system-info/history`; the service-detail view reads per-service series from `/api/services/history`
 
 ## Prerequisites
@@ -53,6 +53,7 @@ flowchart LR
 - uv (Python package manager)
 - systemd (Linux)
 - `sudo` access for service restarts
+- Service user in the `video` group (for `vcgencmd`)
 - Cloudflared (for external access)
 
 ## Installation

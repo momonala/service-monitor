@@ -8,6 +8,7 @@ from pathlib import Path
 import schedule
 from requests import RequestException
 
+from src.host_info import refresh_host_health
 from src.services import get_service_status, get_services
 from src.system_metrics import SAMPLE_INTERVAL_SECONDS, start_metrics_sampler
 from src.telegram import send_service_failure_alert
@@ -121,7 +122,9 @@ def service_health_check() -> None:
 def schedule_loop() -> None:
     """Schedule the periodic tasks."""
     schedule.every(5).minutes.do(service_health_check)
-    logger.info("Scheduled 5-minute service health check")
+    schedule.every(1).minutes.do(refresh_host_health)
+    logger.info("Scheduled 5-minute service health check, and 1-minute host health")
+    refresh_host_health()
     while True:
         schedule.run_pending()
         time.sleep(1)

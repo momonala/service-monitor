@@ -14,9 +14,16 @@ from flask import Flask, Response, jsonify, redirect, render_template, request, 
 from requests import RequestException
 
 from src.backup_status import backup_statuses_for_groups
-from src.canned_info import canned_service_statuses, canned_system_info, websites
+from src.canned_info import (
+    canned_host_health,
+    canned_host_identity,
+    canned_service_statuses,
+    canned_system_info,
+    websites,
+)
 from src.config import FLASK_PORT
 from src.env import INSPECTOR_DETECTOR_CWD, INSPECTOR_DETECTOR_UV_PATH
+from src.host_info import check_apt_updates, get_host_health, get_host_identity
 from src.r2_usage import R2_BREAKDOWNS, R2UsageSummary, fetch_r2_usage_summary, r2_breakdown_payload
 from src.scheduler import (
     DEFAULT_ALERT_FREQUENCY,
@@ -108,6 +115,14 @@ def restart_service():
 
     # `done` is consumed (and stripped from the URL) by the front-end toast.
     return redirect(url_for("index", service=service, done="restart"))
+
+
+@app.route("/api/apt-updates", methods=["POST"])
+def apt_updates():
+    """Count pending apt upgrades now and return {"apt_updates": n}; n is null if apt failed."""
+    if not is_linux():
+        return jsonify({"apt_updates": canned_host_health.apt_updates})
+    return jsonify({"apt_updates": check_apt_updates()})
 
 
 @app.route("/inspector-detector/check", methods=["POST"])
@@ -329,13 +344,18 @@ def r2_usage_by_project(metric: str):
 
 @app.route("/api/system-info")
 def system_info():
-    """Return host (Raspberry Pi) vitals as JSON: temperature, CPU, memory, disk, uptime."""
+    """Return host (Raspberry Pi) vitals as JSON: temperature, CPU, memory, disk, uptime, identity, health."""
     try:
-        info = get_system_info() if is_linux() else canned_system_info
+        if is_linux():
+            info, identity, health = get_system_info(), get_host_identity(), get_host_health()
+        else:
+            info, identity, health = canned_system_info, canned_host_identity, canned_host_health
     except Exception:
         logger.exception("Failed to collect system info")
         return jsonify({"error": "failed to collect system info"}), 500
     payload = asdict(info)
+    payload["host"] = asdict(identity)
+    payload["health"] = asdict(health) if health else None
     try:
         avg_24h, max_24h = temperature_window_stats(window="24h")
         payload["temperature_avg_24h"] = avg_24h

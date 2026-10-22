@@ -1,3 +1,4 @@
+from src.host_info import HostHealth, HostIdentity
 from src.services import ServiceStatus, SystemInfo
 
 # Stand-in host vitals for dev mode (off-Pi, where /proc and /sys aren't the Pi's).
@@ -15,6 +16,24 @@ canned_system_info = SystemInfo(
     disk_used_pct=38.0,
     disk_used_gb=44.7,
     disk_total_gb=117.6,
+)
+
+canned_host_identity = HostIdentity(
+    model="Raspberry Pi 4 Model B Rev 1.4",
+    os_name="Debian GNU/Linux 12 (bookworm)",
+    kernel="6.12.87+rpt-rpi-v8",
+    arch="aarch64",
+    python_version="3.14.2",
+    system_python_version="3.11.2",
+)
+
+canned_host_health = HostHealth(
+    throttled_now=[],
+    throttled_since_boot=["Under-voltage"],
+    reboot_required=False,
+    apt_updates=3,
+    ntp_synced=True,
+    tunnel_active=True,
 )
 
 websites = [

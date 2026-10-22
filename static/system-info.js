@@ -39,7 +39,12 @@
         writes: { title: 'Disk writes, last 24h', format: formatMegabytes },
     };
 
+    const HEALTH_ICONS = { ok: 'check-circle', warn: 'alert-triangle', crit: 'x-circle', unknown: 'alert-circle' };
+
     let ipCopyBound = false;
+    let aptCheckBound = false;
+    let aptChecking = false;
+    let lastHealth = null;
     let syncBreakdownSummary = () => {};
 
     function renderIp(ip) {
@@ -97,6 +102,145 @@
             hour: 'numeric', minute: '2-digit',
         });
         value.textContent = `Last reboot: ${formatted} (${relativeAge(date)})`;
+        value.title = value.textContent;
+    }
+
+    function setLine(id, text, title = '') {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.hidden = !text;
+        el.textContent = text;
+        el.title = title;
+    }
+
+    function joinParts(...parts) {
+        return parts.filter(Boolean).join(' · ');
+    }
+
+    function renderHost(info) {
+        const card = document.getElementById('sidebarHost');
+        const host = info.host;
+        if (!card || !host) return;
+        card.hidden = false;
+
+        setLine('sidebarHostModel', host.model || info.hostname);
+        setLine(
+            'sidebarHostOs',
+            joinParts(host.os_name?.replace(' GNU/Linux', ''), host.arch),
+            host.os_name || '',
+        );
+        setLine(
+            'sidebarHostPython',
+            joinParts(`Kernel ${host.kernel.split('+')[0]}`, `Python ${host.python_version}`),
+            joinParts(
+                `Kernel ${host.kernel}`,
+                `Service Monitor Python ${host.python_version}`,
+                host.system_python_version && `system python3 ${host.system_python_version}`,
+            ),
+        );
+        setLine('sidebarHostCapacity', joinParts(
+            info.cpu_count && `${info.cpu_count} cores`,
+            info.memory_total_mb != null && `${(info.memory_total_mb / 1024).toFixed(1)} GB RAM`,
+            info.disk_total_gb != null && `${Math.round(info.disk_total_gb)} GB disk`,
+        ));
+
+        renderHealth(info.health);
+    }
+
+    function healthItems(health) {
+        const items = [];
+        if (health.throttled_now != null) {
+            if (health.throttled_now.length) {
+                items.push({ level: 'crit', text: `Now: ${health.throttled_now.join(', ')}` });
+            } else if (health.throttled_since_boot.length) {
+                items.push({ level: 'warn', text: `Since boot: ${health.throttled_since_boot.join(', ')}` });
+            } else {
+                items.push({ level: 'ok', text: 'Power and thermals OK' });
+            }
+        }
+        items.push(health.reboot_required
+            ? { level: 'warn', text: 'Reboot required' }
+            : { level: 'ok', text: 'No reboot pending' });
+        items.push(aptItem(health.apt_updates));
+        if (health.ntp_synced != null) {
+            items.push(health.ntp_synced
+                ? { level: 'ok', text: 'Clock synced' }
+                : { level: 'crit', text: 'Clock not synced' });
+        }
+        if (health.tunnel_active != null) {
+            items.push(health.tunnel_active
+                ? { level: 'ok', text: 'Cloudflare tunnel up' }
+                : { level: 'crit', text: 'Cloudflare tunnel down' });
+        }
+        return items;
+    }
+
+    function aptItem(count) {
+        const action = aptChecking ? 'Checking…' : 'Check';
+        if (count == null) return { level: 'unknown', text: 'apt updates unknown', action };
+        return count > 0
+            ? { level: 'warn', text: `${count} apt update${count === 1 ? '' : 's'} pending`, action }
+            : { level: 'ok', text: 'Packages up to date', action };
+    }
+
+    function bindAptCheck(list) {
+        if (aptCheckBound) return;
+        aptCheckBound = true;
+        list.addEventListener('click', async (event) => {
+            if (!event.target.closest('.sidebar-health__check') || aptChecking || !lastHealth) return;
+            aptChecking = true;
+            renderHealth(lastHealth);
+            try {
+                const res = await fetch('/api/apt-updates', { method: 'POST' });
+                if (res.ok) lastHealth = { ...lastHealth, apt_updates: (await res.json()).apt_updates };
+            } finally {
+                aptChecking = false;
+                renderHealth(lastHealth);
+            }
+        });
+    }
+
+    function renderHealth(health) {
+        const list = document.getElementById('sidebarHealthList');
+        const count = document.getElementById('sidebarHealthCount');
+        if (!list || !count) return;
+        lastHealth = health;
+        bindAptCheck(list);
+
+        list.hidden = !health;
+        if (!health) {
+            count.hidden = true;
+            return;
+        }
+
+        const items = healthItems(health);
+        list.replaceChildren(...items.map(({ level, text, action }) => {
+            const li = document.createElement('li');
+            li.className = `sidebar-health__item sidebar-health__item--${level}`;
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('class', 'sidebar-row__icon');
+            svg.setAttribute('aria-hidden', 'true');
+            const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+            use.setAttribute('href', `#icon-${HEALTH_ICONS[level]}`);
+            svg.appendChild(use);
+            const label = document.createElement('span');
+            label.textContent = text;
+            li.append(svg, label);
+            if (action) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'sidebar-row-button sidebar-health__check';
+                button.textContent = action;
+                button.disabled = aptChecking;
+                li.appendChild(button);
+            }
+            return li;
+        }));
+
+        const issues = items.filter((item) => item.level === 'warn' || item.level === 'crit');
+        count.hidden = issues.length === 0;
+        count.textContent = `${issues.length} issue${issues.length === 1 ? '' : 's'}`;
+        count.classList.toggle('sidebar-health__count--crit', issues.some((item) => item.level === 'crit'));
     }
 
     function tempFill(celsius) {
@@ -115,6 +259,7 @@
         }
         container.removeAttribute('aria-busy');
 
+        renderHost(info);
         renderIp(info.local_ip);
         renderReboot(info.boot_time);
         window.ServiceMonitorSystemMetricsChart?.setBootTime(info.boot_time);

@@ -382,6 +382,26 @@ def test_system_info_includes_temperature_avg_24h(mock_metrics_linux, mock_app_l
     assert payload["temperature_max_24h"] >= payload["temperature_avg_24h"]
 
 
+@patch("src.app.is_linux", return_value=False)
+@patch("src.system_metrics.is_linux", return_value=False)
+def test_system_info_includes_host_identity_and_health(mock_metrics_linux, mock_app_linux, client):
+    """GET /api/system-info nests host identity and health alongside the vitals."""
+    payload = client.get("/api/system-info").get_json()
+    assert payload["host"]["model"].startswith("Raspberry Pi")
+    assert payload["host"]["python_version"]
+    assert payload["health"]["apt_updates"] == 3
+    assert payload["health"]["throttled_now"] == []
+
+
+@patch("src.app.check_apt_updates", return_value=7)
+@patch("src.app.is_linux", return_value=True)
+def test_apt_updates_runs_check_on_demand(mock_linux, mock_check, client):
+    """POST /api/apt-updates runs the apt count and returns it."""
+    response = client.post("/api/apt-updates")
+    assert response.get_json() == {"apt_updates": 7}
+    mock_check.assert_called_once()
+
+
 def test_system_info_history_rejects_bad_window(client):
     response = client.get("/api/system-info/history?window=2h")
     assert response.status_code == 400
