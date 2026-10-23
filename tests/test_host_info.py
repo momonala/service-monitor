@@ -51,7 +51,6 @@ def test_refresh_host_health_reads_every_check(monkeypatch, tmp_path):
         _fake_run(
             {
                 "vcgencmd": (0, "throttled=0x50000\n"),
-                "timedatectl": (0, "no\n"),
                 "systemctl": (3, "inactive\n"),
                 "apt": (0, "Listing...\nlibc6/stable 2.36 arm64 [upgradable from: 2.35]\n"),
             }
@@ -60,6 +59,7 @@ def test_refresh_host_health_reads_every_check(monkeypatch, tmp_path):
     reboot_flag = tmp_path / "reboot-required"
     reboot_flag.touch()
     monkeypatch.setattr(host_info, "REBOOT_REQUIRED_PATH", reboot_flag)
+    monkeypatch.setattr(host_info, "TIMESYNC_STATE_DIR", tmp_path)
 
     host_info.check_apt_updates()
     host_info.refresh_host_health()
@@ -80,6 +80,7 @@ def test_refresh_host_health_marks_missing_tools_unavailable(monkeypatch, tmp_pa
 
     monkeypatch.setattr(host_info.subprocess, "run", missing)
     monkeypatch.setattr(host_info, "REBOOT_REQUIRED_PATH", tmp_path / "absent")
+    monkeypatch.setattr(host_info, "TIMESYNC_STATE_DIR", tmp_path / "absent")
 
     host_info.check_apt_updates()
     host_info.refresh_host_health()
@@ -99,7 +100,6 @@ def test_host_health_has_no_apt_count_until_checked(monkeypatch, tmp_path):
         _fake_run(
             {
                 "vcgencmd": (0, "throttled=0x0\n"),
-                "timedatectl": (0, "yes\n"),
                 "systemctl": (0, "active\n"),
                 "apt": (0, "Listing...\nlibc6/stable 2.36 arm64 [upgradable from: 2.35]\n"),
             }
@@ -113,3 +113,10 @@ def test_host_health_has_no_apt_count_until_checked(monkeypatch, tmp_path):
 
     assert host_info.check_apt_updates() == 1
     assert host_info.get_host_health().apt_updates == 1
+
+
+def test_ntp_synced_follows_timesyncd_flag_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(host_info, "TIMESYNC_STATE_DIR", tmp_path)
+    assert host_info._read_ntp_synced() is False
+    (tmp_path / "synchronized").touch()
+    assert host_info._read_ntp_synced() is True

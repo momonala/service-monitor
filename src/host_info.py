@@ -11,6 +11,7 @@ SUBPROCESS_TIMEOUT_SECONDS = 10
 APT_TIMEOUT_SECONDS = 60
 REBOOT_REQUIRED_PATH = Path("/var/run/reboot-required")
 DEVICE_MODEL_PATH = Path("/proc/device-tree/model")
+TIMESYNC_STATE_DIR = Path("/run/systemd/timesync")
 TUNNEL_UNIT = "cloudflared"
 
 # Bit positions in `vcgencmd get_throttled`: low bits are the current state, high bits are sticky since boot.
@@ -122,8 +123,9 @@ def _read_apt_updates() -> int | None:
 
 
 def _read_ntp_synced() -> bool | None:
-    output = _run(["timedatectl", "show", "--property=NTPSynchronized", "--value"])
-    return None if output is None else output == "yes"
+    if not TIMESYNC_STATE_DIR.is_dir():
+        return None
+    return (TIMESYNC_STATE_DIR / "synchronized").exists()
 
 
 def _read_tunnel_active() -> bool | None:
