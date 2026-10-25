@@ -1123,6 +1123,18 @@ textarea:focus-visible {
     outline-offset: 2px;
 }
 
+@property --scale-active {
+    syntax: '<number>';
+    inherits: false;
+    initial-value: 1;
+}
+
+@property --shift {
+    syntax: '<length>';
+    inherits: false;
+    initial-value: 0px;
+}
+
 .metric-breakdown {
     margin-top: var(--spacing-md);
     padding: var(--spacing-md);
@@ -1151,6 +1163,8 @@ textarea:focus-visible {
     list-style: none;
     display: grid;
     gap: var(--spacing-sm);
+    container-type: inline-size;
+    --avatar-bulge: 6px;
 }
 
 .metric-breakdown__row {
@@ -1164,6 +1178,62 @@ textarea:focus-visible {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.metric-breakdown__row--link {
+    --border-gap: calc(var(--spacing-md) - var(--spacing-xs) + 1px);
+    --bulge-stub: max(0px, (1 - 1 / var(--scale-active, 1)) * (50cqw + var(--spacing-xs) + var(--border-gap)));
+    --bulge-line: var(--series-color, var(--border-color));
+    --bulge-grow-y: 3px;
+    position: relative;
+    z-index: 0;
+    margin: calc(-1 * var(--spacing-xs));
+    padding: var(--spacing-xs);
+    border-radius: var(--radius);
+}
+
+.metric-breakdown__row--link.t-avatar {
+    transition:
+        --shift var(--avatar-dur),
+        --scale-active var(--avatar-dur),
+        background-color var(--transition-fast);
+}
+
+.metric-breakdown__row--link::before {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    inset: calc(-1 * var(--bulge-grow-y)) calc(-1 * var(--border-gap));
+    border-inline: 1px solid var(--bulge-line);
+    background:
+        linear-gradient(var(--bulge-line) 0 0) left top / var(--bulge-stub) 1px no-repeat,
+        linear-gradient(var(--bulge-line) 0 0) right top / var(--bulge-stub) 1px no-repeat,
+        linear-gradient(var(--bulge-line) 0 0) left bottom / var(--bulge-stub) 1px no-repeat,
+        linear-gradient(var(--bulge-line) 0 0) right bottom / var(--bulge-stub) 1px no-repeat,
+        var(--color-bg-panel);
+    pointer-events: none;
+}
+
+.metric-breakdown__row--link:hover,
+.metric-breakdown__row--link:focus-within {
+    background: var(--color-hover);
+    z-index: 1;
+}
+
+.metric-breakdown__row--link .metric-breakdown__name {
+    color: inherit;
+    text-decoration: none;
+}
+
+.metric-breakdown__row--link .metric-breakdown__name::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+}
+
+.metric-breakdown__row--link:hover .metric-breakdown__name,
+.metric-breakdown__row--link .metric-breakdown__name:focus-visible {
+    text-decoration: underline;
 }
 
 .metric-breakdown__value {

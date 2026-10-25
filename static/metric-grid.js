@@ -127,11 +127,18 @@
         window.SMTransitions?.revealSkeleton(container);
     }
 
-    function breakdownRow(name, value) {
+    function sidebarHref(project) {
+        const groups = document.querySelectorAll('.sidebar__nav .project-group');
+        const group = [...groups].find((g) => g.dataset.projectGroup === project);
+        return group?.querySelector('.service-link')?.getAttribute('href');
+    }
+
+    function breakdownRow(name, value, href) {
         const row = document.createElement('li');
-        row.className = 'metric-breakdown__row';
-        const nameEl = document.createElement('span');
+        row.className = href ? 'metric-breakdown__row metric-breakdown__row--link t-avatar' : 'metric-breakdown__row';
+        const nameEl = document.createElement(href ? 'a' : 'span');
         nameEl.className = 'metric-breakdown__name';
+        if (href) nameEl.href = href;
         nameEl.textContent = name;
         const valueEl = document.createElement('span');
         valueEl.className = 'metric-breakdown__value';
@@ -171,7 +178,7 @@
     function renderBreakdown(list, { projects, total, other = [], other_total: otherTotal }, format) {
         const largest = Math.max(...projects.map((p) => p.value), ...other.map((o) => o.value)) || 1;
         const projectRows = projects.map(({ project, value, direct, logs }) => {
-            const row = breakdownRow(project, format(value));
+            const row = breakdownRow(project, format(value), sidebarHref(project));
             if (logs !== undefined) {
                 row.title = `${format(direct)} written directly, ${format(logs)} in logs`;
                 row.appendChild(splitBar(direct, logs, largest));
@@ -190,6 +197,7 @@
             ...projectRows,
             ...(other.length ? [totalRow('Outside projects', format(otherTotal)), ...otherRows] : []),
         );
+        window.SMTransitions?.setupAvatarGroup(list);
     }
 
     function showBreakdownMessage(list, message) {

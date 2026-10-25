@@ -482,14 +482,15 @@
     // neighbours with a distance falloff, then springs back on leave.
 
     function setupAvatarGroup(group) {
-        if (!group) return;
-        const items = Array.from(group.querySelectorAll('.t-avatar'));
-        if (!items.length) return;
+        if (!group || 'avatarGroup' in group.dataset) return;
+        group.dataset.avatarGroup = '';
 
         function setShifts(activeIndex, phase) {
             const lift = num('--avatar-lift', -4);
             const falloff = num('--avatar-falloff', 0.45);
             const scale = num('--avatar-scale', 1.05);
+            const bulge = parseFloat(getComputedStyle(group).getPropertyValue('--avatar-bulge'));
+            const activeScale = (el) => Number.isFinite(bulge) ? 1 + (2 * bulge) / el.offsetWidth : scale;
             // The timing function has to be written BEFORE the variable
             // writes — the browser uses whichever one is current when the
             // property changes, which is what gives us a clean lift and a
@@ -498,7 +499,7 @@
                 ? token('--avatar-ease-out', 'cubic-bezier(0.34, 3.85, 0.64, 1)')
                 : token('--avatar-ease-in', 'cubic-bezier(0.22, 1, 0.36, 1)');
 
-            items.forEach((el, i) => {
+            group.querySelectorAll('.t-avatar').forEach((el, i) => {
                 el.style.transitionTimingFunction = timing;
                 if (activeIndex == null) {
                     el.style.setProperty('--shift', '0px');
@@ -507,11 +508,15 @@
                 }
                 const distance = Math.abs(i - activeIndex);
                 el.style.setProperty('--shift', `${(lift * Math.pow(falloff, distance)).toFixed(3)}px`);
-                el.style.setProperty('--scale-active', i === activeIndex ? String(scale) : '1');
+                el.style.setProperty('--scale-active', i === activeIndex ? String(activeScale(el)) : '1');
             });
         }
 
-        items.forEach((el, i) => el.addEventListener('mouseenter', () => setShifts(i, 'in')));
+        group.addEventListener('mouseover', (event) => {
+            const item = event.target.closest('.t-avatar');
+            if (!item) return;
+            setShifts(Array.from(group.querySelectorAll('.t-avatar')).indexOf(item), 'in');
+        });
         group.addEventListener('mouseleave', () => setShifts(null, 'out'));
     }
 
@@ -606,5 +611,6 @@
         setDigits,
         shakeError,
         setupInputClear,
+        setupAvatarGroup,
     };
 })();
