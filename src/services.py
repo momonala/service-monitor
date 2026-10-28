@@ -465,6 +465,7 @@ def sum_io_stat_written_bytes(io_stat: str) -> int:
 JOURNALD_CGROUP = "/system.slice/systemd-journald.service"
 SYSTEM_SLICE_CGROUP = "/system.slice"
 USER_SLICE_CGROUP = "/user.slice"
+CLAUDE_PROCESS_NAME = "claude"
 JOURNALCTL_TIMEOUT_SECONDS = 10
 
 
@@ -512,6 +513,25 @@ def read_root_sectors_written() -> int | None:
         return int(fields[6])
     except (OSError, IndexError, ValueError):
         return None
+
+
+def read_process_written_bytes(name: str) -> dict[int, int]:
+    """Return bytes headed for disk from /proc/<pid>/io for every process whose comm is ``name``, keyed by pid.
+
+    ``cancelled_write_bytes`` is subtracted: those writes were truncated or deleted before writeback.
+    """
+    written = {}
+    for proc in Path("/proc").iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            if (proc / "comm").read_text().strip() != name:
+                continue
+            counters = dict(line.split(":") for line in (proc / "io").read_text().splitlines())
+            written[int(proc.name)] = int(counters["write_bytes"]) - int(counters["cancelled_write_bytes"])
+        except (OSError, ValueError, KeyError):
+            continue
+    return written
 
 
 def _read_cgroup_anon(cgroup_path: str) -> int | None:

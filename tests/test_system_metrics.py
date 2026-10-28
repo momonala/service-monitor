@@ -12,6 +12,7 @@ from src.system_metrics import (
     MAX_RETURN_POINTS,
     CounterDeltaTracker,
     MetricsAggregator,
+    ProcessWriteTracker,
     ServiceCpuTracker,
     ServiceSample,
     SystemSample,
@@ -565,7 +566,7 @@ def _breakdown_tick(store: MetricsStore, now: float) -> None:
 
 
 def _writes_tick(store: MetricsStore, ts: float, host_mb: tuple[float | None, ...]) -> None:
-    disk, journald, system, user = (None if mb is None else mb * 1024 for mb in host_mb)
+    disk, journald, system, user, claude = (None if mb is None else mb * 1024 for mb in host_mb)
     services = [
         ServiceSample(ts, "projects_small.service", 1.0, 2.0, 1024.0, log_written_kb=512.0),
         ServiceSample(ts, "projects_big.service", 10.0, 5.0, 3072.0),
@@ -577,6 +578,7 @@ def _writes_tick(store: MetricsStore, ts: float, host_mb: tuple[float | None, ..
         journald_written_kb=journald,
         system_slice_written_kb=system,
         user_slice_written_kb=user,
+        claude_written_kb=claude,
     )
     store.append(make_tick(host, services))
 
@@ -594,9 +596,11 @@ def test_writes_breakdown_splits_logs_and_counts_only_fully_read_ticks_outside_p
     metrics_store: MetricsStore, linux_units
 ):
     now = 1_700_000_000.0
-    _writes_tick(metrics_store, now - 7200, (500.0, None, None, None))  # before the slice counters existed
+    _writes_tick(
+        metrics_store, now - 7200, (500.0, None, None, None, None)
+    )  # before the slice counters existed
     metrics_store.flush()
-    _writes_tick(metrics_store, now - 60, (20.0, 4.0, 12.0, 1.0))
+    _writes_tick(metrics_store, now - 60, (20.0, 4.0, 12.0, 1.5, 1.0))
 
     assert project_breakdown_payload("writes", now=now, store=metrics_store) == {
         "metric": "writes",
@@ -608,10 +612,11 @@ def test_writes_breakdown_splits_logs_and_counts_only_fully_read_ticks_outside_p
         ],
         "other_total": 14.5,
         "other": [
-            {"name": "Kernel / filesystem", "value": 7.0},
+            {"name": "Kernel / filesystem", "value": 6.5},
             {"name": "Other system services", "value": 4.0},
             {"name": "System logs (non-project)", "value": 2.5},
-            {"name": "User sessions", "value": 1.0},
+            {"name": "Claude Code", "value": 1.0},
+            {"name": "User sessions (excl. Claude Code)", "value": 0.5},
         ],
     }
 
@@ -690,3 +695,12 @@ def test_disk_by_project_measures_outermost_dirs_once_and_caches(linux_units, mo
 def test_breakdown_rejects_unknown_metric():
     with pytest.raises(KeyError):
         project_breakdown_payload("temperature")
+
+
+def test_process_write_tracker_counts_new_processes_whole_and_skips_exited_ones():
+    tracker = ProcessWriteTracker()
+
+    assert tracker.delta({1: 100}) is None
+    assert tracker.delta({1: 150, 2: 30}) == 80
+    assert tracker.delta({2: 40}) == 10
+    assert tracker.delta({}) == 0

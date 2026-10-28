@@ -18,6 +18,7 @@ from pathlib import Path
 
 from src.metrics_store import RETENTION_SECONDS, MetricsStore, ServiceSample, SystemSample, make_tick
 from src.services import (
+    CLAUDE_PROCESS_NAME,
     JOURNALD_CGROUP,
     SYSTEM_SLICE_CGROUP,
     USER_SLICE_CGROUP,
@@ -33,6 +34,7 @@ from src.services import (
     read_cgroup_written_bytes,
     read_directory_size_kb,
     read_journal_entries,
+    read_process_written_bytes,
     read_root_sectors_written,
     read_service_metrics,
     read_total_memory_bytes,
@@ -257,6 +259,27 @@ class CounterDeltaTracker:
             del self._prev[key]
 
 
+class ProcessWriteTracker:
+    """Per-interval writes summed over a changing set of processes.
+
+    A process first seen after the first reading counts its whole counter, since it started within
+    the interval. Writes a process makes between the last reading and its exit are lost.
+    """
+
+    def __init__(self) -> None:
+        self._prev: dict[int, int] | None = None
+
+    def delta(self, written_by_pid: dict[int, int]) -> int | None:
+        previous, self._prev = self._prev, written_by_pid
+        if previous is None:
+            return None
+        return sum(
+            value - previous.get(pid, 0)
+            for pid, value in written_by_pid.items()
+            if value >= previous.get(pid, 0)
+        )
+
+
 def _kb(byte_count: int | None) -> float | None:
     return None if byte_count is None else round(byte_count / 1024, 1)
 
@@ -365,6 +388,7 @@ def metrics_sampler_loop(
     service_cpu_tracker = ServiceCpuTracker()
     service_write_tracker = CounterDeltaTracker()
     host_write_tracker = CounterDeltaTracker()
+    claude_write_tracker = ProcessWriteTracker()
     journal_tracker = JournalEntryTracker()
     cpu_count = os.cpu_count()
     total_memory_bytes = read_total_memory_bytes()
@@ -390,6 +414,9 @@ def metrics_sampler_loop(
                     ),
                     user_slice_written_kb=_kb(
                         host_write_tracker.delta("user", read_cgroup_written_bytes(USER_SLICE_CGROUP))
+                    ),
+                    claude_written_kb=_kb(
+                        claude_write_tracker.delta(read_process_written_bytes(CLAUDE_PROCESS_NAME))
                     ),
                 )
                 services = sample_services(
@@ -763,28 +790,38 @@ def _written_mb_split_by_project(
 def _written_mb_outside_projects(now: float, store: MetricsStore | None) -> dict[str, float]:
     """Writes no project accounts for, by source. The subtracted rows are clamped at zero.
 
-    The root-disk counter and the cgroup counters measure at different layers, so the
-    subtractions are estimates rather than exact remainders.
+    The root-disk counter, the cgroup counters and the per-process Claude Code counter measure at
+    different layers, so the subtractions are estimates rather than exact remainders.
     """
     if is_linux():
         totals_kb = (store or default_store()).written_kb_by_source(now - window_seconds(WRITES_WINDOW), now)
-        disk, journald, system, user, projects, project_logs = (
+        disk, journald, system, user, claude, projects, project_logs = (
             totals_kb[key] / 1024
             for key in (
                 "disk_written_kb",
                 "journald_written_kb",
                 "system_slice_written_kb",
                 "user_slice_written_kb",
+                "claude_written_kb",
                 "services_written_kb",
                 "services_log_written_kb",
             )
         )
     else:
-        disk, journald, system, user, projects, project_logs = 3480.0, 900.0, 2400.0, 80.0, 900.0, 450.0
+        disk, journald, system, user, claude, projects, project_logs = (
+            3480.0,
+            900.0,
+            2400.0,
+            80.0,
+            60.0,
+            900.0,
+            450.0,
+        )
     return {
         "System logs (non-project)": max(0.0, journald - project_logs),
         "Other system services": max(0.0, system - journald - projects),
-        "User sessions": user,
+        "Claude Code": min(claude, user),
+        "User sessions (excl. Claude Code)": max(0.0, user - claude),
         "Kernel / filesystem": max(0.0, disk - system - user),
     }
 
