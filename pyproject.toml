@@ -30,11 +30,6 @@ packages = ["src"]
 app = "src.app:main"
 config = "src.config:main"
 
-[tool.black]
-line-length = 110
-target-version = ['py312']
-include = '\.pyi?$'
-
 [tool.ruff]
 line-length = 110
 
