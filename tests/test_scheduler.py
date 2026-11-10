@@ -1,6 +1,7 @@
 """Tests for scheduler.py alert logic."""
 
 from datetime import datetime, timedelta
+from enum import StrEnum
 from unittest.mock import patch
 
 import pytest
@@ -172,7 +173,29 @@ def test_health_check_suppresses_when_already_alerted(mock_get_services, mock_ge
     assert "Alert suppressed for projects_foo.service (muted or already sent)" in messages
 
 
-def _run_checks(checks: list[tuple[datetime, bool]]) -> list[datetime]:
+class Check(StrEnum):
+    FAILED = "failed"
+    ACTIVE = "active"
+    AUTO_RESTART = "auto_restart"
+    INACTIVE = "inactive"
+    STATUS_ERROR = "status_error"
+
+
+def _status_for(check: Check) -> ServiceStatus:
+    status = _failed_service()
+    status.is_failed = check is Check.FAILED
+    status.is_active = check is Check.ACTIVE
+    status.full_status = {
+        Check.FAILED: "Active: failed (Result: exit-code)",
+        Check.ACTIVE: "Active: active (running)",
+        Check.AUTO_RESTART: "Active: activating (auto-restart) (Result: exit-code)",
+        Check.INACTIVE: "Active: inactive (dead)",
+        Check.STATUS_ERROR: "\nFailed to get unit status",
+    }[check]
+    return status
+
+
+def _run_checks(checks: list[tuple[datetime, Check]]) -> list[datetime]:
     sent_at: list[datetime] = []
     with (
         patch("src.scheduler.get_services", return_value=["projects_foo.service"]),
@@ -180,11 +203,9 @@ def _run_checks(checks: list[tuple[datetime, bool]]) -> list[datetime]:
         patch("src.scheduler.send_service_failure_alert") as mock_alert,
         patch("src.scheduler.datetime") as mock_datetime,
     ):
-        for now, failed in checks:
+        for now, check in checks:
             mock_datetime.now.return_value = now
-            status = _failed_service()
-            status.is_failed = failed
-            mock_get_status.return_value = status
+            mock_get_status.return_value = _status_for(check)
             calls_before = mock_alert.call_count
             service_health_check()
             if mock_alert.call_count > calls_before:
@@ -195,27 +216,44 @@ def _run_checks(checks: list[tuple[datetime, bool]]) -> list[datetime]:
 def test_recovery_rearms_hourly_alert():
     set_alert_frequency("projects_foo.service", "hourly")
     fail, recover, fail_again = NOW, NOW + timedelta(minutes=5), NOW + timedelta(minutes=10)
-    assert _run_checks([(fail, True), (recover, False), (fail_again, True)]) == [fail, fail_again]
+    checks = [(fail, Check.FAILED), (recover, Check.ACTIVE), (fail_again, Check.FAILED)]
+    assert _run_checks(checks) == [fail, fail_again]
 
 
 def test_recovery_rearms_daily_alert():
     set_alert_frequency("projects_foo.service", "daily")
     fail, recover, fail_again = NOW, NOW + timedelta(hours=2), NOW + timedelta(hours=4)
-    assert _run_checks([(fail, True), (recover, False), (fail_again, True)]) == [fail, fail_again]
+    checks = [(fail, Check.FAILED), (recover, Check.ACTIVE), (fail_again, Check.FAILED)]
+    assert _run_checks(checks) == [fail, fail_again]
+
+
+@pytest.mark.parametrize("between", [Check.AUTO_RESTART, Check.INACTIVE, Check.STATUS_ERROR])
+def test_not_running_between_failures_stays_suppressed(between):
+    set_alert_frequency("projects_foo.service", "hourly")
+    checks = [
+        (NOW, Check.FAILED),
+        (NOW + timedelta(minutes=5), between),
+        (NOW + timedelta(minutes=10), Check.FAILED),
+    ]
+    assert _run_checks(checks) == [NOW]
 
 
 def test_continuous_failure_stays_suppressed():
     set_alert_frequency("projects_foo.service", "hourly")
-    checks = [(NOW + timedelta(minutes=minutes), True) for minutes in (0, 5, 10, 55)]
+    checks = [(NOW + timedelta(minutes=minutes), Check.FAILED) for minutes in (0, 5, 10, 55)]
     assert _run_checks(checks) == [NOW]
 
 
 def test_muted_service_stays_muted_across_recovery():
     set_alert_frequency("projects_foo.service", "muted")
-    checks = [(NOW, True), (NOW + timedelta(minutes=5), False), (NOW + timedelta(minutes=10), True)]
+    checks = [
+        (NOW, Check.FAILED),
+        (NOW + timedelta(minutes=5), Check.ACTIVE),
+        (NOW + timedelta(minutes=10), Check.FAILED),
+    ]
     assert _run_checks(checks) == []
 
 
 def test_recovery_without_prior_alert_is_noop():
-    assert _run_checks([(NOW, False)]) == []
-    assert "projects_foo.service" not in sched._alerted_services
+    first_failure = NOW + timedelta(minutes=5)
+    assert _run_checks([(NOW, Check.ACTIVE), (first_failure, Check.FAILED)]) == [first_failure]

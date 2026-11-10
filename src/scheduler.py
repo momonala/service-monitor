@@ -127,7 +127,8 @@ def service_health_check() -> None:
     for service_status in service_statuses:
         state = _check_alert_state(service_status.name, service_status.is_failed)
         if state is AlertState.HEALTHY:
-            _clear_alerted(service_status.name)
+            if service_status.is_active:
+                _clear_alerted(service_status.name)
             continue
         logger.warning("Service %s has failed.", service_status.name)
         if state in (AlertState.MUTED, AlertState.ALREADY_ALERTED):
