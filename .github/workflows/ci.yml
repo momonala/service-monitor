@@ -37,7 +37,7 @@ jobs:
         node-version: 22
 
     - name: Run JS tests
-      run: node --test tests/js/
+      run: node --test tests/js/*.test.js
 
     - name: Check formatting
       run: uvx ruff format --check .

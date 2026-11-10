@@ -7,7 +7,7 @@ echo "🧪 Running tests..."
 uv run --with pytest --with pytest-cov pytest
 
 echo "Running JS tests..."
-node --test tests/js/
+node --test tests/js/*.test.js
 
 echo "🖤 Running ruff format..."
 if ! uvx ruff format --check .; then
