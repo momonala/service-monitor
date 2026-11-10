@@ -275,6 +275,12 @@ ACTIVE_WITH_FAILED_ELSEWHERE = {
         "     CGroup: /system.slice/projects_foo.service\n"
         '             └─1234 /usr/bin/python watch.py --match "Active: failed"\n'
     ),
+    "later_active_line": (
+        "● projects_foo.service - Foo dashboard\n"
+        "     Active: active (running) since Tue 2026-11-10 09:55:12 CET; 2h 4min ago\n"
+        "   Main PID: 1234 (python)\n"
+        "     Active: failed (Result: exit-code)\n"
+    ),
 }
 
 

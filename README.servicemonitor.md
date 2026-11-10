@@ -421,8 +421,9 @@ starting at `ALERT_RESET_HOUR`, default 6 AM).
 ```
 ServiceStatus
 ├── name: str              # Full service name (e.g. "projects_foo.service")
-├── is_active: bool        # True if "active (running)" in systemctl status
-├── is_failed: bool        # True if "active: failed" in systemctl status
+├── state: ServiceState    # From the first "Active:" line of systemctl status (or systemctl is-active)
+├── is_active: bool        # Property: state is ServiceState.ACTIVE
+├── is_failed: bool        # Property: state is ServiceState.FAILED
 ├── uptime: str | None     # Parsed from "Active: ... since ...; X ago"
 ├── memory: str | None     # Parsed from "Memory: X"
 ├── cpu: str | None        # Parsed from "CPU: X"
