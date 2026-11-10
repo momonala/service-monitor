@@ -3,12 +3,9 @@
 
     const LOG_SPIKE_BUCKETS = 48;
     const MAX_LOG_ENTRIES = 10000;
-    const RECONNECT_BASE_MS = 2000;
-    const RECONNECT_MAX_MS = 30000;
+    const { LogStreamConnection } = window.ServiceMonitorLogStreamConnection;
 
-    let activeLogSource = null;
-    let reconnectDelay = RECONNECT_BASE_MS;
-    let reconnectTimer = null;
+    let logConnection = null;
     const logEntries = [];
     let reverseDirection = false;
 
@@ -462,10 +459,7 @@
         }
     }
 
-    /**
-     * Open an SSE connection to /logs/stream for the current service.
-     * Closes any existing connection first. Reconnects on error with exponential backoff.
-     */
+    /** Open an SSE connection to /logs/stream for the current service. */
     function setupLogStream() {
         const logEl = document.getElementById('logStream');
         if (!logEl) return;
@@ -473,46 +467,16 @@
         const service = logEl.dataset.service;
         if (!service) return;
 
-        if (activeLogSource) {
-            activeLogSource.close();
-            activeLogSource = null;
-        }
-        if (reconnectTimer !== null) {
-            clearTimeout(reconnectTimer);
-            reconnectTimer = null;
-        }
-
-        const source = new EventSource(`/logs/stream?service=${encodeURIComponent(service)}`);
-        activeLogSource = source;
-
-        source.onopen = () => {
-            reconnectDelay = RECONNECT_BASE_MS;
-        };
-
-        source.onmessage = (evt) => {
-            let line;
-            try {
-                line = JSON.parse(evt.data);
-            } catch {
-                line = evt.data;
-            }
-            appendLogLine(logEl, line);
-        };
-
-        source.onerror = () => {
-            source.close();
-            activeLogSource = null;
-            reconnectTimer = setTimeout(() => {
-                reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
-                setupLogStream();
-            }, reconnectDelay);
-        };
+        logConnection?.close();
+        logConnection = new LogStreamConnection(
+            `/logs/stream?service=${encodeURIComponent(service)}`,
+            (line) => appendLogLine(logEl, line),
+        );
+        logConnection.open();
     }
 
     function closeLogStream() {
-        if (reconnectTimer !== null) clearTimeout(reconnectTimer);
-        activeLogSource?.close();
-        activeLogSource = null;
+        logConnection?.close();
     }
 
     let resizeFilterTimer = null;
