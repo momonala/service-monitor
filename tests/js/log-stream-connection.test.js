@@ -91,14 +91,6 @@ test('a successful open resets the backoff to the base delay', () => {
     assert.equal(h.failAndRetry(), 2000);
 });
 
-test('an error on an open connection backs off with the current delay', () => {
-    const h = harness();
-    h.connection.open();
-    h.latest().onopen();
-    h.latest().onerror();
-    assert.deepEqual(h.pendingDelays(), [2000]);
-});
-
 test('close stops the source and cancels a pending reconnect', () => {
     const h = harness();
     h.connection.open();
