@@ -3,6 +3,7 @@ import logging
 import threading
 import time
 from datetime import datetime, timedelta
+from enum import StrEnum
 from pathlib import Path
 
 import schedule
@@ -79,19 +80,34 @@ def _alert_period_start(now: datetime) -> datetime:
     return now.replace(hour=ALERT_RESET_HOUR, minute=0, second=0, microsecond=0)
 
 
-def _should_alert(service_name: str) -> bool:
+class AlertState(StrEnum):
+    HEALTHY = "healthy"
+    FIRING = "firing"
+    SUPPRESSED = "suppressed"
+
+
+def on_check(*, failed: bool, frequency: str, last_alert: datetime | None, now: datetime) -> AlertState:
+    """Classify one health-check result: nothing to do, send an alert, or stay quiet."""
+    if not failed:
+        return AlertState.HEALTHY
+    if frequency == "muted":
+        return AlertState.SUPPRESSED
+    if last_alert is None:
+        return AlertState.FIRING
+    if frequency == "hourly":
+        elapsed_seconds = (now - last_alert).total_seconds()
+        return AlertState.FIRING if elapsed_seconds >= 3600 else AlertState.SUPPRESSED
+    return AlertState.FIRING if last_alert < _alert_period_start(now) else AlertState.SUPPRESSED
+
+
+def _check_alert_state(service_name: str, failed: bool) -> AlertState:
     with _alert_lock:
-        frequency = _alert_settings.get(service_name, DEFAULT_ALERT_FREQUENCY)
-        if frequency == "muted":
-            return False
-        last_alert = _alerted_services.get(service_name)
-        if last_alert is None:
-            return True
-        now = datetime.now()
-        if frequency == "hourly":
-            return (now - last_alert).total_seconds() >= 3600
-        # daily: alert once per reset window
-        return last_alert < _alert_period_start(now)
+        return on_check(
+            failed=failed,
+            frequency=_alert_settings.get(service_name, DEFAULT_ALERT_FREQUENCY),
+            last_alert=_alerted_services.get(service_name),
+            now=datetime.now(),
+        )
 
 
 def _mark_alerted(service_name: str) -> None:
@@ -104,10 +120,11 @@ def service_health_check() -> None:
     services = get_services()
     service_statuses = [get_service_status(svc) for svc in services]
     for service_status in service_statuses:
-        if not service_status.is_failed:
+        state = _check_alert_state(service_status.name, service_status.is_failed)
+        if state is AlertState.HEALTHY:
             continue
         logger.warning("Service %s has failed.", service_status.name)
-        if not _should_alert(service_status.name):
+        if state is AlertState.SUPPRESSED:
             logger.info("Alert suppressed for %s (muted or already sent)", service_status.name)
             continue
         try:

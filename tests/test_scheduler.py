@@ -7,7 +7,7 @@ import pytest
 from requests import RequestException
 
 import src.scheduler as sched
-from src.scheduler import _should_alert, service_health_check, set_alert_frequency
+from src.scheduler import AlertState, on_check, service_health_check, set_alert_frequency
 from src.services import ServiceStatus
 
 
@@ -37,39 +37,39 @@ def _failed_service(name: str = "projects_foo.service") -> ServiceStatus:
     )
 
 
+NOW = datetime(2026, 3, 10, 12, 0)
+
+
+def test_healthy_service_never_alerts():
+    assert on_check(failed=False, frequency="hourly", last_alert=None, now=NOW) is AlertState.HEALTHY
+
+
 def test_muted_service_never_alerts():
-    set_alert_frequency("projects_foo.service", "muted")
-    assert _should_alert("projects_foo.service") is False
+    assert on_check(failed=True, frequency="muted", last_alert=None, now=NOW) is AlertState.SUPPRESSED
 
 
-def test_unknown_service_defaults_to_hourly_and_alerts_first_time():
-    assert _should_alert("projects_unknown.service") is True
+def test_first_failure_fires():
+    assert on_check(failed=True, frequency="hourly", last_alert=None, now=NOW) is AlertState.FIRING
 
 
 def test_hourly_suppresses_within_window():
-    set_alert_frequency("projects_foo.service", "hourly")
-    sched._alerted_services["projects_foo.service"] = datetime.now() - timedelta(minutes=30)
-    assert _should_alert("projects_foo.service") is False
+    last_alert = NOW - timedelta(minutes=30)
+    assert on_check(failed=True, frequency="hourly", last_alert=last_alert, now=NOW) is AlertState.SUPPRESSED
 
 
-def test_hourly_alerts_after_window():
-    set_alert_frequency("projects_foo.service", "hourly")
-    sched._alerted_services["projects_foo.service"] = datetime.now() - timedelta(hours=2)
-    assert _should_alert("projects_foo.service") is True
+def test_hourly_fires_after_window():
+    last_alert = NOW - timedelta(hours=2)
+    assert on_check(failed=True, frequency="hourly", last_alert=last_alert, now=NOW) is AlertState.FIRING
 
 
 def test_daily_suppresses_within_same_window():
-    set_alert_frequency("projects_foo.service", "daily")
-    window_start = sched._alert_period_start(datetime.now())
-    sched._alerted_services["projects_foo.service"] = window_start + timedelta(seconds=1)
-    assert _should_alert("projects_foo.service") is False
+    last_alert = sched._alert_period_start(NOW) + timedelta(seconds=1)
+    assert on_check(failed=True, frequency="daily", last_alert=last_alert, now=NOW) is AlertState.SUPPRESSED
 
 
-def test_daily_alerts_after_reset():
-    set_alert_frequency("projects_foo.service", "daily")
-    # Last alert was before today's 6 AM reset window
-    sched._alerted_services["projects_foo.service"] = datetime.now() - timedelta(days=1)
-    assert _should_alert("projects_foo.service") is True
+def test_daily_fires_after_reset():
+    last_alert = NOW - timedelta(days=1)
+    assert on_check(failed=True, frequency="daily", last_alert=last_alert, now=NOW) is AlertState.FIRING
 
 
 def test_set_invalid_frequency_raises():
