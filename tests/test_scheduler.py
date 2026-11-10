@@ -87,3 +87,30 @@ def test_health_check_does_not_mark_alerted_when_send_fails(mock_get_services, m
     service_health_check()
     mock_alert.assert_called_once()
     assert "projects_foo.service" not in sched._alerted_services
+
+
+@pytest.fixture
+def settings_file(tmp_path, monkeypatch):
+    path = tmp_path / "alert_settings.json"
+    monkeypatch.setattr(sched, "_SETTINGS_FILE", path)
+    return path
+
+
+def test_load_settings_drops_invalid_frequencies(settings_file):
+    settings_file.write_text('{"projects_a.service": "muted", "projects_b.service": "never"}')
+    sched._load_settings()
+    assert sched.get_all_alert_settings() == {"projects_a.service": "muted"}
+
+
+def test_load_settings_ignores_corrupt_json(settings_file):
+    settings_file.write_text("{not json")
+    sched._load_settings()
+    assert sched.get_all_alert_settings() == {}
+    assert sched.get_alert_frequency("projects_a.service") == "hourly"
+
+
+def test_saved_settings_load_back(settings_file):
+    sched.set_alert_frequency("projects_a.service", "daily")
+    sched._alert_settings.clear()
+    sched._load_settings()
+    assert sched.get_all_alert_settings() == {"projects_a.service": "daily"}
