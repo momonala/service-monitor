@@ -16,7 +16,6 @@
 
     /**
      * One SSE connection to a log stream, reconnecting with capped exponential backoff.
-     * The source factory and timer functions are injectable so the state logic runs under test.
      */
     class LogStreamConnection {
         /**

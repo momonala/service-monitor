@@ -6,7 +6,7 @@ set -e
 echo "🧪 Running tests..."
 uv run --with pytest --with pytest-cov pytest
 
-echo "🧪 Running JS tests..."
+echo "Running JS tests..."
 node --test tests/js/
 
 echo "🖤 Running ruff format..."

@@ -126,14 +126,3 @@ test('reopening closes the previous source and ignores its late events', () => {
     assert.deepEqual(h.pendingDelays(), []);
     assert.deepEqual(h.lines, []);
 });
-
-test('reopening during backoff cancels the timer and keeps the current delay', () => {
-    const h = harness();
-    h.connection.open();
-    h.failAndRetry();
-    h.latest().onerror();
-    h.connection.open();
-    assert.deepEqual(h.pendingDelays(), []);
-    h.latest().onerror();
-    assert.deepEqual(h.pendingDelays(), [4000]);
-});

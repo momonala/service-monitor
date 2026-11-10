@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 import src.scheduler as sched
+from src.app import app
 from src.scheduler import service_health_check, set_alert_frequency
 from src.services import get_service_health, get_service_status
 from src.telegram import _format_service_failure_alert
@@ -258,16 +259,47 @@ def test_failure_alert_reports_derived_flags():
     assert "*Is Active:* `False`\n*Is Failed:* `True`\n" in message
 
 
+ACTIVE_WITH_FAILED_TEXT = (
+    "● projects_foo.service - Foo dashboard\n"
+    "     Active: active (running) since Tue 2026-11-10 09:55:12 CET; 2h 4min ago\n"
+    '     Status: "upstream reported Active: failed"\n'
+)
+
+
 def test_failed_text_anywhere_outranks_active_so_the_alert_still_fires():
-    status_text = (
-        "● projects_foo.service - Foo dashboard\n"
-        "     Active: active (running) since Tue 2026-11-10 09:55:12 CET; 2h 4min ago\n"
-        '     Status: "upstream reported Active: failed"\n'
-    )
-    with patch("src.services.get_info_for_service", return_value=status_text):
+    with patch("src.services.get_info_for_service", return_value=ACTIVE_WITH_FAILED_TEXT):
         status = get_service_status(SERVICE, include_ci=False)
-    assert status.is_failed
-    assert _alerts_sent_for_text(status_text) == [NOW]
+    assert (status.is_active, status.is_failed, status.uptime) == (False, True, None)
+    message = _format_service_failure_alert(status)
+    assert "*Is Active:* `False`\n*Is Failed:* `True`\n*Uptime:* `N/A`\n" in message
+    assert _alerts_sent_for_text(ACTIVE_WITH_FAILED_TEXT) == [NOW]
+
+
+def test_failed_text_anywhere_shows_as_failed_in_sidebar_details():
+    app.config["TESTING"] = True
+    with (
+        patch("src.app.is_linux", return_value=True),
+        patch("src.app.get_services", return_value=[SERVICE]),
+        patch("src.app.latest_service_samples_payload", return_value={SERVICE: {"cpu_percent": 4.2}}),
+        patch("src.services.get_info_for_service", return_value=ACTIVE_WITH_FAILED_TEXT),
+        patch("src.services.get_ci_status", return_value=None),
+        app.test_client() as client,
+    ):
+        payload = client.get("/api/services/sidebar-details").get_json()
+    assert payload["services"] == [
+        {
+            "name": SERVICE,
+            "is_active": False,
+            "is_failed": True,
+            "uptime": None,
+            "last_error": None,
+            "ci_status": None,
+            "project_group": "foo",
+            "cpu_percent": None,
+            "memory_used_pct": None,
+            "memory_used_mb": None,
+        }
+    ]
 
 
 def _alerts_sent_for_text(status_text: str) -> list[datetime]:
