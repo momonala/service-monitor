@@ -115,6 +115,11 @@ def _mark_alerted(service_name: str) -> None:
         _alerted_services[service_name] = datetime.now()
 
 
+def _clear_alerted(service_name: str) -> None:
+    with _alert_lock:
+        _alerted_services.pop(service_name, None)
+
+
 def service_health_check() -> None:
     """Check the health of services and send Telegram alerts for failures."""
     services = get_services()
@@ -122,6 +127,7 @@ def service_health_check() -> None:
     for service_status in service_statuses:
         state = _check_alert_state(service_status.name, service_status.is_failed)
         if state is AlertState.HEALTHY:
+            _clear_alerted(service_status.name)
             continue
         logger.warning("Service %s has failed.", service_status.name)
         if state in (AlertState.MUTED, AlertState.ALREADY_ALERTED):

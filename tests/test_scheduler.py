@@ -170,3 +170,52 @@ def test_health_check_suppresses_when_already_alerted(mock_get_services, mock_ge
     messages = [record.getMessage() for record in caplog.records]
     assert "Service projects_foo.service has failed." in messages
     assert "Alert suppressed for projects_foo.service (muted or already sent)" in messages
+
+
+def _run_checks(checks: list[tuple[datetime, bool]]) -> list[datetime]:
+    sent_at: list[datetime] = []
+    with (
+        patch("src.scheduler.get_services", return_value=["projects_foo.service"]),
+        patch("src.scheduler.get_service_status") as mock_get_status,
+        patch("src.scheduler.send_service_failure_alert") as mock_alert,
+        patch("src.scheduler.datetime") as mock_datetime,
+    ):
+        for now, failed in checks:
+            mock_datetime.now.return_value = now
+            status = _failed_service()
+            status.is_failed = failed
+            mock_get_status.return_value = status
+            calls_before = mock_alert.call_count
+            service_health_check()
+            if mock_alert.call_count > calls_before:
+                sent_at.append(now)
+    return sent_at
+
+
+def test_recovery_rearms_hourly_alert():
+    set_alert_frequency("projects_foo.service", "hourly")
+    fail, recover, fail_again = NOW, NOW + timedelta(minutes=5), NOW + timedelta(minutes=10)
+    assert _run_checks([(fail, True), (recover, False), (fail_again, True)]) == [fail, fail_again]
+
+
+def test_recovery_rearms_daily_alert():
+    set_alert_frequency("projects_foo.service", "daily")
+    fail, recover, fail_again = NOW, NOW + timedelta(hours=2), NOW + timedelta(hours=4)
+    assert _run_checks([(fail, True), (recover, False), (fail_again, True)]) == [fail, fail_again]
+
+
+def test_continuous_failure_stays_suppressed():
+    set_alert_frequency("projects_foo.service", "hourly")
+    checks = [(NOW + timedelta(minutes=minutes), True) for minutes in (0, 5, 10, 55)]
+    assert _run_checks(checks) == [NOW]
+
+
+def test_muted_service_stays_muted_across_recovery():
+    set_alert_frequency("projects_foo.service", "muted")
+    checks = [(NOW, True), (NOW + timedelta(minutes=5), False), (NOW + timedelta(minutes=10), True)]
+    assert _run_checks(checks) == []
+
+
+def test_recovery_without_prior_alert_is_noop():
+    assert _run_checks([(NOW, False)]) == []
+    assert "projects_foo.service" not in sched._alerted_services
