@@ -109,8 +109,13 @@ def test_daily_fires_after_reset():
 
 def test_unknown_service_defaults_to_hourly_and_fires_first_time():
     assert sched._check_alert_state("projects_unknown.service", failed=True) is AlertState.FIRING
-    sched._alerted_services["projects_unknown.service"] = datetime.now() - timedelta(minutes=30)
-    assert sched._check_alert_state("projects_unknown.service", failed=True) is AlertState.ALREADY_ALERTED
+
+
+@patch("src.scheduler.datetime")
+def test_unknown_service_uses_hourly_default(mock_datetime):
+    mock_datetime.now.return_value = NOW
+    sched._alerted_services["projects_unknown.service"] = NOW - timedelta(hours=2)
+    assert sched._check_alert_state("projects_unknown.service", failed=True) is AlertState.FIRING
 
 
 def test_set_invalid_frequency_raises():
@@ -154,9 +159,14 @@ def test_health_check_does_not_mark_alerted_when_send_fails(mock_get_services, m
 @patch("src.scheduler.send_service_failure_alert")
 @patch("src.scheduler.get_service_status")
 @patch("src.scheduler.get_services")
-def test_health_check_suppresses_when_already_alerted(mock_get_services, mock_get_status, mock_alert):
+def test_health_check_suppresses_when_already_alerted(mock_get_services, mock_get_status, mock_alert, caplog):
     mock_get_services.return_value = ["projects_foo.service"]
     mock_get_status.return_value = _failed_service()
     service_health_check()
-    service_health_check()
+    caplog.clear()
+    with caplog.at_level("INFO", logger="src.scheduler"):
+        service_health_check()
     mock_alert.assert_called_once()
+    messages = [record.getMessage() for record in caplog.records]
+    assert "Service projects_foo.service has failed." in messages
+    assert "Alert suppressed for projects_foo.service (muted or already sent)" in messages
