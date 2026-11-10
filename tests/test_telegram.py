@@ -5,15 +5,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from src.services import ServiceStatus
+from src.services import ServiceState, ServiceStatus
 from src.telegram import TELEGRAM_MAX_MESSAGE_LENGTH, send_service_failure_alert, send_telegram_message
 
 
 def _failed_status(**overrides) -> ServiceStatus:
     base = {
         "name": "projects_foo.service",
-        "is_active": False,
-        "is_failed": True,
+        "state": ServiceState.FAILED,
         "uptime": "1h",
         "memory": "10M",
         "cpu": "1s",

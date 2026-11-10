@@ -9,7 +9,7 @@ from requests import RequestException
 
 import src.scheduler as sched
 from src.scheduler import AlertState, on_check, service_health_check, set_alert_frequency
-from src.services import ServiceStatus
+from src.services import ServiceState, ServiceStatus
 
 
 @pytest.fixture(autouse=True)
@@ -25,8 +25,7 @@ def reset_scheduler_state():
 def _failed_service(name: str = "projects_foo.service") -> ServiceStatus:
     return ServiceStatus(
         name=name,
-        is_active=False,
-        is_failed=True,
+        state=ServiceState.FAILED,
         uptime=None,
         memory=None,
         cpu=None,
@@ -183,8 +182,13 @@ class Check(StrEnum):
 
 def _status_for(check: Check) -> ServiceStatus:
     status = _failed_service()
-    status.is_failed = check is Check.FAILED
-    status.is_active = check is Check.ACTIVE
+    status.state = {
+        Check.FAILED: ServiceState.FAILED,
+        Check.ACTIVE: ServiceState.ACTIVE,
+        Check.AUTO_RESTART: ServiceState.ACTIVATING,
+        Check.INACTIVE: ServiceState.INACTIVE,
+        Check.STATUS_ERROR: ServiceState.INACTIVE,
+    }[check]
     status.full_status = {
         Check.FAILED: "Active: failed (Result: exit-code)",
         Check.ACTIVE: "Active: active (running)",

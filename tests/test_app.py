@@ -8,7 +8,7 @@ from requests import RequestException
 
 from src.app import app
 from src.env import INSPECTOR_DETECTOR_CWD, INSPECTOR_DETECTOR_UV_PATH
-from src.services import ServiceStatus
+from src.services import ServiceState, ServiceStatus
 
 
 @pytest.fixture
@@ -28,8 +28,7 @@ def test_index(mock_get_info, mock_get_health, mock_get_services, mock_is_linux,
     mock_get_services.return_value = ["projects_test1.service", "projects_test2.service"]
     mock_get_health.return_value = ServiceStatus(
         name="projects_test1.service",
-        is_active=True,
-        is_failed=False,
+        state=ServiceState.ACTIVE,
         uptime="1 day",
         memory="100M",
         cpu="50ms",
@@ -114,8 +113,7 @@ def test_sidebar_details(mock_get_status, mock_get_services, mock_is_linux, mock
     """Sidebar details endpoint returns enriched service status JSON, including latest CPU/memory."""
     mock_get_status.return_value = ServiceStatus(
         name="projects_test1.service",
-        is_active=True,
-        is_failed=False,
+        state=ServiceState.ACTIVE,
         uptime="1 day",
         memory="100M",
         cpu="10s",
@@ -181,8 +179,7 @@ def test_sidebar_details_inactive_service_hides_stale_metrics(
     when it was active is still in the DB. The sidebar must not surface that stale reading."""
     mock_get_status.return_value = ServiceStatus(
         name="projects_backup.service",
-        is_active=False,
-        is_failed=False,
+        state=ServiceState.INACTIVE,
         uptime=None,
         memory=None,
         cpu=None,
@@ -213,8 +210,7 @@ def test_sidebar_details_missing_metrics_are_null(
     """When a service has no recorded samples yet, cpu/memory fields are null rather than absent/erroring."""
     mock_get_status.return_value = ServiceStatus(
         name="projects_test1.service",
-        is_active=True,
-        is_failed=False,
+        state=ServiceState.ACTIVE,
         uptime="1 day",
         memory="100M",
         cpu="10s",
@@ -241,8 +237,7 @@ def test_service_current_inactive_service_hides_stale_metrics(
     """Same staleness fix as the sidebar, for the per-service detail view's live tiles."""
     mock_get_health.return_value = ServiceStatus(
         name="projects_backup.service",
-        is_active=False,
-        is_failed=False,
+        state=ServiceState.INACTIVE,
         uptime=None,
         memory=None,
         cpu=None,

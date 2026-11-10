@@ -9,6 +9,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 
 import requests
@@ -25,11 +26,27 @@ _services_cache: tuple[float, list[str]] | None = None
 _ci_status_cache: dict[str, tuple[float, str | None]] = {}
 
 
+class ServiceState(StrEnum):
+    ACTIVE = "active"
+    RELOADING = "reloading"
+    ACTIVATING = "activating"
+    DEACTIVATING = "deactivating"
+    INACTIVE = "inactive"
+    FAILED = "failed"
+
+
+def service_state(active_state: str) -> ServiceState:
+    """Map systemd's ActiveState word (`systemctl is-active` output) to a ServiceState."""
+    try:
+        return ServiceState(active_state.strip().lower())
+    except ValueError:
+        return ServiceState.INACTIVE
+
+
 @dataclass
 class ServiceStatus:
     name: str
-    is_active: bool
-    is_failed: bool
+    state: ServiceState
     uptime: str | None
     memory: str | None
     cpu: str | None
@@ -38,6 +55,14 @@ class ServiceStatus:
     project_group: str
     suffix: str | None
     ci_status: str | None
+
+    @property
+    def is_active(self) -> bool:
+        return self.state is ServiceState.ACTIVE
+
+    @property
+    def is_failed(self) -> bool:
+        return self.state is ServiceState.FAILED
 
     @property
     def is_timer(self) -> bool:
@@ -176,9 +201,14 @@ def parse_timer_next(status_text: str) -> str | None:
     return _format_uptime(match.group(1)) if match else None
 
 
-def _parse_is_active(status_text: str) -> bool:
-    """Return True for running services and waiting timers."""
-    return bool(re.search(r"Active:\s+active\s+\(", status_text, re.IGNORECASE))
+def parse_active_state(status_text: str) -> str:
+    """Return the ActiveState word from `systemctl status` output, or "" when there is none."""
+    if "active: failed" in status_text.lower():
+        return "failed"
+    if re.search(r"Active:\s+active\s+\(", status_text, re.IGNORECASE):
+        return "active"
+    match = re.search(r"Active: ([\w-]+)\s+\(", status_text, re.IGNORECASE)
+    return match.group(1) if match else ""
 
 
 def _parse_status_field(status_text: str, field: str) -> str | None:
@@ -220,13 +250,9 @@ def get_service_health(service: str) -> ServiceStatus:
     """Get minimal service status for first paint."""
     project_group, suffix = parse_service_name(service)
     result = subprocess.run(["systemctl", "is-active", service], text=True, capture_output=True)
-    state = (result.stdout or "").strip().lower()
-    is_active = state == "active"
-    is_failed = state == "failed"
     return ServiceStatus(
         name=service,
-        is_active=is_active,
-        is_failed=is_failed,
+        state=service_state(result.stdout or ""),
         uptime=None,
         memory=None,
         cpu=None,
@@ -241,23 +267,21 @@ def get_service_health(service: str) -> ServiceStatus:
 def get_service_status(service: str, include_ci: bool = True, status_lines: int = 0) -> ServiceStatus:
     status_text = get_info_for_service(service, lines=status_lines)
     project_group, suffix = parse_service_name(service)
-    is_active = _parse_is_active(status_text)
-    is_failed = "active: failed" in status_text.lower()
+    state = service_state(parse_active_state(status_text))
     is_timer = service.endswith(".timer")
 
     # Only fetch CI status for primary project services (no suffix, not a timer)
     ci_status = get_ci_status(project_group) if include_ci and suffix is None and not is_timer else None
 
     uptime = None
-    if is_active:
+    if state is ServiceState.ACTIVE:
         uptime = parse_uptime(status_text)
     if is_timer and uptime is None:
         uptime = parse_timer_next(status_text)
 
     return ServiceStatus(
         name=service,
-        is_active=is_active,
-        is_failed=is_failed,
+        state=state,
         uptime=uptime,
         memory=parse_memory(status_text),
         cpu=parse_cpu(status_text),
