@@ -202,12 +202,8 @@ def parse_timer_next(status_text: str) -> str | None:
 
 
 def parse_active_state(status_text: str) -> str:
-    """Return the ActiveState word from `systemctl status` output, or "" when there is none."""
-    if "active: failed" in status_text.lower():
-        return "failed"
-    if re.search(r"Active:\s+active\s+\(", status_text, re.IGNORECASE):
-        return "active"
-    match = re.search(r"Active: ([\w-]+)\s+\(", status_text, re.IGNORECASE)
+    """Return the ActiveState word from the `Active:` line of `systemctl status`, or "" when there is none."""
+    match = re.search(r"^\s*Active:\s+(\S+)", status_text, re.MULTILINE)
     return match.group(1) if match else ""
 
 

@@ -10,7 +10,7 @@ import pytest
 import src.scheduler as sched
 from src.app import app
 from src.scheduler import service_health_check, set_alert_frequency
-from src.services import get_service_health, get_service_status
+from src.services import ServiceState, get_service_health, get_service_status
 from src.telegram import _format_service_failure_alert
 
 SERVICE = "projects_foo.service"
@@ -259,29 +259,57 @@ def test_failure_alert_reports_derived_flags():
     assert "*Is Active:* `False`\n*Is Failed:* `True`\n" in message
 
 
-ACTIVE_WITH_FAILED_TEXT = (
-    "● projects_foo.service - Foo dashboard\n"
-    "     Active: active (running) since Tue 2026-11-10 09:55:12 CET; 2h 4min ago\n"
-    '     Status: "upstream reported Active: failed"\n'
-)
+ACTIVE_WITH_FAILED_ELSEWHERE = {
+    "description": (
+        "● projects_foo.service - Foo, alerts when upstream is Active: failed\n"
+        "     Active: active (running) since Tue 2026-11-10 09:55:12 CET; 2h 4min ago\n"
+    ),
+    "status_line": (
+        "● projects_foo.service - Foo dashboard\n"
+        "     Active: active (running) since Tue 2026-11-10 09:55:12 CET; 2h 4min ago\n"
+        '     Status: "upstream reported Active: failed"\n'
+    ),
+    "cgroup_line": (
+        "● projects_foo.service - Foo dashboard\n"
+        "     Active: active (running) since Tue 2026-11-10 09:55:12 CET; 2h 4min ago\n"
+        "     CGroup: /system.slice/projects_foo.service\n"
+        '             └─1234 /usr/bin/python watch.py --match "Active: failed"\n'
+    ),
+}
 
 
-def test_failed_text_anywhere_outranks_active_so_the_alert_still_fires():
-    with patch("src.services.get_info_for_service", return_value=ACTIVE_WITH_FAILED_TEXT):
+@pytest.mark.parametrize("where", ACTIVE_WITH_FAILED_ELSEWHERE)
+def test_failed_text_outside_the_active_line_is_ignored(where):
+    status_text = ACTIVE_WITH_FAILED_ELSEWHERE[where]
+    with patch("src.services.get_info_for_service", return_value=status_text):
         status = get_service_status(SERVICE, include_ci=False)
-    assert (status.is_active, status.is_failed, status.uptime) == (False, True, None)
-    message = _format_service_failure_alert(status)
-    assert "*Is Active:* `False`\n*Is Failed:* `True`\n*Uptime:* `N/A`\n" in message
-    assert _alerts_sent_for_text(ACTIVE_WITH_FAILED_TEXT) == [NOW]
+    assert status.state is ServiceState.ACTIVE
+    assert (status.is_active, status.is_failed, status.uptime) == (True, False, "2h")
+    assert _alerts_sent_for_text(status_text) == []
 
 
-def test_failed_text_anywhere_shows_as_failed_in_sidebar_details():
+@pytest.mark.parametrize("where", ACTIVE_WITH_FAILED_ELSEWHERE)
+def test_failed_text_outside_the_active_line_clears_a_stored_alert(where):
+    sched._alerted_services[SERVICE] = NOW - timedelta(minutes=5)
+    _alerts_sent_for_text(ACTIVE_WITH_FAILED_ELSEWHERE[where])
+    assert SERVICE not in sched._alerted_services
+
+
+def test_real_failed_active_line_still_alerts():
+    status_text = FIXTURES["failed"].status_stdout
+    with patch("src.services.get_info_for_service", return_value=status_text):
+        status = get_service_status(SERVICE, include_ci=False)
+    assert status.state is ServiceState.FAILED
+    assert _alerts_sent_for_text(status_text) == [NOW]
+
+
+def test_failed_text_outside_the_active_line_shows_as_active_in_sidebar_details():
     app.config["TESTING"] = True
     with (
         patch("src.app.is_linux", return_value=True),
         patch("src.app.get_services", return_value=[SERVICE]),
         patch("src.app.latest_service_samples_payload", return_value={SERVICE: {"cpu_percent": 4.2}}),
-        patch("src.services.get_info_for_service", return_value=ACTIVE_WITH_FAILED_TEXT),
+        patch("src.services.get_info_for_service", return_value=ACTIVE_WITH_FAILED_ELSEWHERE["status_line"]),
         patch("src.services.get_ci_status", return_value=None),
         app.test_client() as client,
     ):
@@ -289,13 +317,13 @@ def test_failed_text_anywhere_shows_as_failed_in_sidebar_details():
     assert payload["services"] == [
         {
             "name": SERVICE,
-            "is_active": False,
-            "is_failed": True,
-            "uptime": None,
+            "is_active": True,
+            "is_failed": False,
+            "uptime": "2h",
             "last_error": None,
             "ci_status": None,
             "project_group": "foo",
-            "cpu_percent": None,
+            "cpu_percent": 4.2,
             "memory_used_pct": None,
             "memory_used_mb": None,
         }
