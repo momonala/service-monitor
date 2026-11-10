@@ -83,21 +83,21 @@ def _alert_period_start(now: datetime) -> datetime:
 class AlertState(StrEnum):
     HEALTHY = "healthy"
     FIRING = "firing"
-    SUPPRESSED = "suppressed"
+    MUTED = "muted"
+    ALREADY_ALERTED = "already_alerted"
 
 
 def on_check(*, failed: bool, frequency: str, last_alert: datetime | None, now: datetime) -> AlertState:
-    """Classify one health-check result: nothing to do, send an alert, or stay quiet."""
     if not failed:
         return AlertState.HEALTHY
     if frequency == "muted":
-        return AlertState.SUPPRESSED
+        return AlertState.MUTED
     if last_alert is None:
         return AlertState.FIRING
     if frequency == "hourly":
         elapsed_seconds = (now - last_alert).total_seconds()
-        return AlertState.FIRING if elapsed_seconds >= 3600 else AlertState.SUPPRESSED
-    return AlertState.FIRING if last_alert < _alert_period_start(now) else AlertState.SUPPRESSED
+        return AlertState.FIRING if elapsed_seconds >= 3600 else AlertState.ALREADY_ALERTED
+    return AlertState.FIRING if last_alert < _alert_period_start(now) else AlertState.ALREADY_ALERTED
 
 
 def _check_alert_state(service_name: str, failed: bool) -> AlertState:
@@ -124,7 +124,7 @@ def service_health_check() -> None:
         if state is AlertState.HEALTHY:
             continue
         logger.warning("Service %s has failed.", service_status.name)
-        if state is AlertState.SUPPRESSED:
+        if state in (AlertState.MUTED, AlertState.ALREADY_ALERTED):
             logger.info("Alert suppressed for %s (muted or already sent)", service_status.name)
             continue
         try:
