@@ -206,10 +206,10 @@ def get_info_for_service(service: str, lines: int = 1000) -> str:
         capture_output=True,
     )
     if result.returncode != 0:
-        # Timer-triggered backup services sit "inactive (dead)" between runs, which makes
-        # `systemctl status` exit non-zero even though nothing is actually wrong.
-        if "backup" in service.lower() and not result.stderr.strip():
-            logger.debug("systemctl status non-zero for idle backup service %s", service)
+        # Timer-triggered services sit "inactive (dead)" between runs, which makes
+        # `systemctl status` exit 3 with empty stderr even though nothing is actually wrong.
+        if result.returncode == 3 and not result.stderr.strip():
+            logger.debug("systemctl status exit 3 for idle service %s", service)
         else:
             logger.warning("systemctl status failed for %s: %s", service, result.stderr.strip())
         return result.stdout + "\n" + result.stderr
