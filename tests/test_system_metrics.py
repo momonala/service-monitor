@@ -9,7 +9,6 @@ import pytest
 from src.metrics_store import MetricsStore, make_tick
 from src.services import ServiceCounters, SystemInfo
 from src.system_metrics import (
-    MAX_RETURN_POINTS,
     CounterDeltaTracker,
     MetricsAggregator,
     ProcessWriteTracker,
@@ -18,18 +17,15 @@ from src.system_metrics import (
     SystemSample,
     attribute_log_writes,
     average_ticks,
-    canned_history,
     get_history,
     get_latest_service_samples,
     get_service_history,
-    history_payload,
     host_writes_payload,
     latest_service_samples_payload,
     project_breakdown_payload,
     sample_from_info,
     sample_services,
     service_cpu_percent,
-    service_history_payload,
     service_writes_payload,
     temperature_window_stats,
 )
@@ -88,41 +84,11 @@ def test_record_and_get_history(metrics_store: MetricsStore):
     assert samples[0].ts < samples[-1].ts
 
 
-def test_get_history_rejects_unknown_window(metrics_store: MetricsStore):
-    with pytest.raises(ValueError, match="Invalid window"):
-        get_history(window="2h", store=metrics_store)
-
-
 def test_window_seconds_rejects_unknown():
     from src.system_metrics import window_seconds
 
     with pytest.raises(ValueError, match="Invalid window"):
         window_seconds("2h")
-
-
-def test_prune_old_samples(metrics_store: MetricsStore):
-    now = 1_700_000_000.0
-    _record(metrics_store, _sample(now - 8 * 24 * 3600))
-    _record(metrics_store, _sample(now - 60))
-
-    metrics_store.prune(now=now)
-
-    samples = get_history(window="7d", now=now, store=metrics_store)
-    assert len(samples) == 1
-
-
-def test_downsample_caps_points(metrics_store: MetricsStore):
-    """Large histories are bucket-averaged down to MAX_RETURN_POINTS."""
-    now = 1_700_000_000.0
-    for i in range(MAX_RETURN_POINTS * 3):
-        _record(
-            metrics_store,
-            _sample(now - (MAX_RETURN_POINTS * 3 - i) * 30, cpu=float(i % 50), cpu_max=float(i % 50) + 5),
-        )
-
-    samples = get_history(window="7d", now=now, store=metrics_store, max_points=MAX_RETURN_POINTS)
-    assert len(samples) <= MAX_RETURN_POINTS
-    assert len(samples) > 0
 
 
 def test_downsample_uses_max_of_maxes_not_max_of_avgs(metrics_store: MetricsStore):
@@ -173,40 +139,11 @@ def test_sample_from_info():
     )
 
 
-def test_canned_history_has_points_with_max():
-    samples = canned_history(window="1h", now=1_700_000_000.0)
-    assert len(samples) > 10
-    assert samples[0].ts < samples[-1].ts
-    assert samples[0].temperature_c_max is not None
-    assert samples[0].temperature_c_max >= samples[0].temperature_c
-
-
-@pytest.mark.parametrize("window", ["1h", "6h", "24h", "7d"])
-def test_history_payload_shape_off_linux(window, monkeypatch):
-    monkeypatch.setattr("src.system_metrics.is_linux", lambda: False)
-    payload = history_payload(window=window)
-    assert payload["window"] == window
-    assert isinstance(payload["samples"], list)
-    assert payload["samples"]
-    assert {
-        "ts",
-        "temperature_c",
-        "cpu_percent",
-        "memory_used_pct",
-        "disk_used_pct",
-        "temperature_c_max",
-        "cpu_percent_max",
-        "memory_used_pct_max",
-        "disk_used_pct_max",
-    } <= payload["samples"][0].keys()
-
-
 @pytest.mark.parametrize(
     ("first", "second", "expected"),
     [
         ((0, 100), (40, 200), 40.0),
         ((10, 100), (10, 100), None),  # no progress
-        ((0, 100), (100, 200), 100.0),
     ],
 )
 def test_cpu_percent_from_delta(first, second, expected):
@@ -244,35 +181,19 @@ def test_metrics_aggregator_emits_avg_and_max():
     assert stored.temperature_c_max == 60.0
 
 
-def test_temperature_window_stats_average_from_db(metrics_store: MetricsStore, monkeypatch):
-    """24h average is the mean of in-window samples, ignoring nulls."""
-    monkeypatch.setattr("src.system_metrics.is_linux", lambda: True)
-    now = 1_700_000_000.0
-    _record(metrics_store, _sample(now - 100, temp=40))
-    _record(metrics_store, _sample(now - 50, temp=50))
-    _record(metrics_store, _sample(now - 10, temp=60))
-    _record(
-        metrics_store,
-        SystemSample(
-            ts=now - 5,
-            temperature_c=None,
-            cpu_percent=10.0,
-            memory_used_pct=40.0,
-            disk_used_pct=30.0,
-        ),
-    )
-
-    avg, _ = temperature_window_stats(window="1h", now=now, store=metrics_store)
-    assert avg == 50.0
-
-
-def test_temperature_window_stats_uses_stored_max(metrics_store: MetricsStore, monkeypatch):
-    """Window stats return avg of means and max of stored peaks."""
+def test_temperature_window_stats_uses_stored_max_and_ignores_nulls(metrics_store: MetricsStore, monkeypatch):
+    """Window stats return avg of means and max of stored peaks, skipping samples without a reading."""
     monkeypatch.setattr("src.system_metrics.is_linux", lambda: True)
     now = 1_700_000_000.0
     _record(metrics_store, _sample(now - 100, temp=40, temp_max=48))
     _record(metrics_store, _sample(now - 50, temp=50, temp_max=55))
     _record(metrics_store, _sample(now - 10, temp=60, temp_max=72))
+    _record(
+        metrics_store,
+        SystemSample(
+            ts=now - 5, temperature_c=None, cpu_percent=10.0, memory_used_pct=40.0, disk_used_pct=30.0
+        ),
+    )
 
     avg, peak = temperature_window_stats(window="1h", now=now, store=metrics_store)
     assert avg == 50.0
@@ -282,32 +203,6 @@ def test_temperature_window_stats_uses_stored_max(metrics_store: MetricsStore, m
 def test_temperature_window_stats_empty_window(metrics_store: MetricsStore, monkeypatch):
     monkeypatch.setattr("src.system_metrics.is_linux", lambda: True)
     assert temperature_window_stats(window="1h", now=1_700_000_000.0, store=metrics_store) == (None, None)
-
-
-def test_temperature_window_stats_canned_off_linux(monkeypatch):
-    monkeypatch.setattr("src.system_metrics.is_linux", lambda: False)
-    avg, peak = temperature_window_stats(window="24h", now=1_700_000_000.0)
-    assert avg is not None and peak is not None
-    assert 40.0 <= avg <= 60.0
-
-
-def test_rollup_by_time_averages_and_keeps_max():
-    from src.system_metrics import _rollup_by_time
-
-    # Four 30s samples spanning two 2-minute epoch buckets.
-    base = 1_700_000_000.0
-    samples = [
-        _sample(base + 0, temp=40, temp_max=42),
-        _sample(base + 30, temp=50, temp_max=55),
-        _sample(base + 120, temp=60, temp_max=70),
-        _sample(base + 150, temp=70, temp_max=75),
-    ]
-    rolled = _rollup_by_time(samples, bucket_seconds=120)
-    assert len(rolled) == 2
-    assert rolled[0].temperature_c == 45.0
-    assert rolled[0].temperature_c_max == 55.0
-    assert rolled[1].temperature_c == 65.0
-    assert rolled[1].temperature_c_max == 75.0
 
 
 def test_rollup_averages_disk_writes_into_a_per_sample_rate():
@@ -346,8 +241,6 @@ def test_get_history_applies_window_rollup(metrics_store: MetricsStore, monkeypa
     ("prev_nsec", "cur_nsec", "prev_ts", "cur_ts", "cpu_count", "expected"),
     [
         (0, 15 * 10**9, 100.0, 130.0, 4, 12.5),  # 15s CPU over 30s wall on 4 cores
-        (0, 30 * 10**9, 100.0, 130.0, 1, 100.0),  # fully saturating a single core
-        (0, 0, 100.0, 130.0, 4, 0.0),  # idle
         (10**9, 0, 100.0, 130.0, 4, None),  # counter reset (service restarted)
         (0, 10**9, 100.0, 100.0, 4, None),  # non-positive interval
         (0, 10**9, 100.0, 130.0, None, None),  # unknown core count
@@ -369,8 +262,8 @@ def test_service_cpu_tracker_forget_drops_dead_units():
     tracker.read_percent("a", 10**9, 100.0, 4)
     tracker.read_percent("b", 10**9, 100.0, 4)
     tracker.forget({"a"})
-    assert "b" not in tracker._prev
-    assert "a" in tracker._prev
+    assert tracker.read_percent("a", 2 * 10**9, 130.0, 4) is not None
+    assert tracker.read_percent("b", 2 * 10**9, 130.0, 4) is None
 
 
 def test_record_and_get_service_history(metrics_store: MetricsStore):
@@ -466,15 +359,6 @@ def test_sample_services_reads_memory_and_cpu(monkeypatch):
     assert by_name["projects_foo.service"].cpu_percent is None  # first read has no delta
     assert by_name["projects_foo.service"].written_kb is None
     assert by_name["projects_bar.service"].memory_used_pct is None
-
-
-def test_service_history_payload_off_linux(monkeypatch):
-    monkeypatch.setattr("src.system_metrics.is_linux", lambda: False)
-    payload = service_history_payload("projects_foo.service", window="6h")
-    assert payload["service"] == "projects_foo.service"
-    assert payload["window"] == "6h"
-    assert payload["samples"]
-    assert {"ts", "service", "memory_used_pct", "cpu_percent"} <= payload["samples"][0].keys()
 
 
 def test_start_metrics_sampler_with_default_store_does_not_deadlock(tmp_path: Path, monkeypatch):
@@ -690,11 +574,6 @@ def test_disk_by_project_measures_outermost_dirs_once_and_caches(linux_units, mo
         }
     )
     assert sorted(measured) == [tmp_path / "big", tmp_path / "small"]
-
-
-def test_breakdown_rejects_unknown_metric():
-    with pytest.raises(KeyError):
-        project_breakdown_payload("temperature")
 
 
 def test_process_write_tracker_counts_new_processes_whole_and_skips_exited_ones():

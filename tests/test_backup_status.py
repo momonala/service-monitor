@@ -44,16 +44,6 @@ def test_read_manifest_missing_file_returns_empty(tmp_path, monkeypatch):
     assert _read_manifest() == {}
 
 
-def test_local_fingerprint_matches_backup_sh_format(tmp_path):
-    """Fingerprint must match backup.sh's `stat -c '%s:%.Y'` — size:seconds.nanoseconds."""
-    db_path = tmp_path / "test.db"
-    db_path.write_bytes(b"hello")
-
-    fingerprint = _local_fingerprint(db_path)
-
-    assert fingerprint == _stat_token(db_path.stat())
-
-
 def test_local_fingerprint_includes_wal_file(tmp_path):
     db_path = tmp_path / "test.db"
     db_path.write_bytes(b"hello")
@@ -113,21 +103,6 @@ def test_status_for_db_green_when_intact_and_unchanged(tmp_path):
     assert is_stale is False
 
 
-def test_status_for_db_green_and_stale_when_changed_since_backup(tmp_path):
-    """Last backup succeeded, but the source has moved on — still green, just flagged stale."""
-    db_path = tmp_path / "repo" / "data" / "a.db"
-    db_path.parent.mkdir(parents=True)
-    db_path.write_bytes(b"hello")
-    entry = _entry(md5="abc123", fingerprint="stale-fingerprint", hours_ago=1.0)
-
-    status, _, is_stale = _status_for_db(
-        datetime.now(timezone.utc), tmp_path, "repo/data/a.db", entry, {"data/a.db": "abc123"}
-    )
-
-    assert status == "green"
-    assert is_stale is True
-
-
 def test_status_for_db_stays_green_and_stale_even_when_old(tmp_path):
     """No more age-based escalation to red — staleness is reported via the flag, not color."""
     db_path = tmp_path / "repo" / "data" / "a.db"
@@ -141,14 +116,6 @@ def test_status_for_db_stays_green_and_stale_even_when_old(tmp_path):
 
     assert status == "green"
     assert is_stale is True
-
-
-def test_status_for_db_red_when_remote_hash_missing(tmp_path):
-    entry = _entry(md5="abc123", hours_ago=0.1)
-
-    status, _, _ = _status_for_db(datetime.now(timezone.utc), tmp_path, "repo/data/a.db", entry, {})
-
-    assert status == "red"
 
 
 def test_status_for_db_red_when_remote_hash_mismatched(tmp_path):

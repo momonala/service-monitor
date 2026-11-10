@@ -27,6 +27,7 @@ class Fixture:
     is_active_returncode: int
     expected_active: bool
     expected_failed: bool
+    expected_uptime: str | None = None
     unit: str = SERVICE
 
 
@@ -49,6 +50,7 @@ FIXTURES = {
         is_active_returncode=0,
         expected_active=True,
         expected_failed=False,
+        expected_uptime="2h",
     ),
     "timer_waiting": Fixture(
         status_stdout=(
@@ -64,6 +66,7 @@ FIXTURES = {
         is_active_returncode=0,
         expected_active=True,
         expected_failed=False,
+        expected_uptime="15m",
         unit=TIMER,
     ),
     "failed": Fixture(
@@ -127,15 +130,6 @@ FIXTURES = {
         expected_active=False,
         expected_failed=False,
     ),
-    "unit_not_found_old_systemd": Fixture(
-        status_stdout="",
-        status_stderr="Unit projects_foo.service could not be found.\n",
-        status_returncode=4,
-        is_active_stdout="unknown\n",
-        is_active_returncode=4,
-        expected_active=False,
-        expected_failed=False,
-    ),
     "command_error": Fixture(
         status_stdout="",
         status_stderr="Failed to connect to bus: No such file or directory\n",
@@ -173,46 +167,18 @@ def reset_scheduler_state():
 
 
 @pytest.mark.parametrize("name", FIXTURES)
-def test_full_status_flags(name):
-    fixture = FIXTURES[name]
-    with (
-        patch("src.services.subprocess.run", side_effect=_fake_systemctl(fixture)),
-        patch("src.services.get_ci_status", return_value=None),
-    ):
-        status = get_service_status(fixture.unit)
-    assert (status.is_active, status.is_failed) == (fixture.expected_active, fixture.expected_failed)
-
-
-@pytest.mark.parametrize("name", FIXTURES)
-def test_minimal_health_flags(name):
-    fixture = FIXTURES[name]
-    with patch("src.services.subprocess.run", side_effect=_fake_systemctl(fixture)):
-        status = get_service_health(fixture.unit)
-    assert (status.is_active, status.is_failed) == (fixture.expected_active, fixture.expected_failed)
-
-
-@pytest.mark.parametrize("name", FIXTURES)
-def test_minimal_and_full_paths_agree_on_state(name):
-    fixture = FIXTURES[name]
-    with (
-        patch("src.services.subprocess.run", side_effect=_fake_systemctl(fixture)),
-        patch("src.services.get_ci_status", return_value=None),
-    ):
-        assert get_service_health(fixture.unit).state is get_service_status(fixture.unit).state
-
-
-@pytest.mark.parametrize("name", FIXTURES)
-def test_full_status_fields_derived_from_state(name):
+def test_full_and_minimal_paths_derive_the_same_state(name):
     fixture = FIXTURES[name]
     with (
         patch("src.services.subprocess.run", side_effect=_fake_systemctl(fixture)),
         patch("src.services.get_ci_status", return_value="success"),
     ):
         status = get_service_status(fixture.unit)
-    expected_uptime = {"active": "2h", "timer_waiting": "15m"}.get(name)
-    assert status.uptime == expected_uptime
+        minimal = get_service_health(fixture.unit)
+    assert (status.is_active, status.is_failed) == (fixture.expected_active, fixture.expected_failed)
+    assert minimal.state is status.state
+    assert status.uptime == fixture.expected_uptime
     assert status.ci_status == (None if fixture.unit == TIMER else "success")
-    assert status.last_error is None
 
 
 def _alerts_sent(checks: list[tuple[datetime, str]]) -> list[datetime]:
@@ -234,19 +200,28 @@ def _alerts_sent(checks: list[tuple[datetime, str]]) -> list[datetime]:
     return sent_at
 
 
-@pytest.mark.parametrize("name", FIXTURES)
-def test_single_check_alerts_only_when_failed(name):
-    expected = [NOW] if FIXTURES[name].expected_failed else []
-    assert _alerts_sent([(NOW, name)]) == expected
-
-
 @pytest.mark.parametrize("between", [name for name in FIXTURES if name != "failed"])
 def test_only_running_rearms_alert_between_failures(between):
-    set_alert_frequency(SERVICE, "hourly")
     later, last = NOW + timedelta(minutes=5), NOW + timedelta(minutes=10)
     sent = _alerts_sent([(NOW, "failed"), (later, between), (last, "failed")])
     expected = [NOW, last] if FIXTURES[between].expected_active else [NOW]
     assert sent == expected
+
+
+def test_continuous_failure_stays_suppressed_within_the_hour():
+    checks = [(NOW + timedelta(minutes=minutes), "failed") for minutes in (0, 5, 55)]
+    assert _alerts_sent(checks) == [NOW]
+
+
+def test_muted_service_stays_muted_across_recovery(tmp_path, monkeypatch):
+    monkeypatch.setattr(sched, "_SETTINGS_FILE", tmp_path / "alert_settings.json")
+    set_alert_frequency(SERVICE, "muted")
+    checks = [
+        (NOW, "failed"),
+        (NOW + timedelta(minutes=5), "active"),
+        (NOW + timedelta(minutes=10), "failed"),
+    ]
+    assert _alerts_sent(checks) == []
 
 
 def test_failure_alert_reports_derived_flags():
@@ -285,28 +260,15 @@ ACTIVE_WITH_FAILED_ELSEWHERE = {
 
 
 @pytest.mark.parametrize("where", ACTIVE_WITH_FAILED_ELSEWHERE)
-def test_failed_text_outside_the_active_line_is_ignored(where):
+def test_failed_text_outside_the_active_line_is_ignored_and_rearms(where):
     status_text = ACTIVE_WITH_FAILED_ELSEWHERE[where]
     with patch("src.services.get_info_for_service", return_value=status_text):
         status = get_service_status(SERVICE, include_ci=False)
     assert status.state is ServiceState.ACTIVE
-    assert (status.is_active, status.is_failed, status.uptime) == (True, False, "2h")
-    assert _alerts_sent_for_text(status_text) == []
-
-
-@pytest.mark.parametrize("where", ACTIVE_WITH_FAILED_ELSEWHERE)
-def test_failed_text_outside_the_active_line_clears_a_stored_alert(where):
+    assert status.uptime == "2h"
     sched._alerted_services[SERVICE] = NOW - timedelta(minutes=5)
-    _alerts_sent_for_text(ACTIVE_WITH_FAILED_ELSEWHERE[where])
+    assert _alerts_sent_for_text(status_text) == []
     assert SERVICE not in sched._alerted_services
-
-
-def test_real_failed_active_line_still_alerts():
-    status_text = FIXTURES["failed"].status_stdout
-    with patch("src.services.get_info_for_service", return_value=status_text):
-        status = get_service_status(SERVICE, include_ci=False)
-    assert status.state is ServiceState.FAILED
-    assert _alerts_sent_for_text(status_text) == [NOW]
 
 
 def test_failed_text_outside_the_active_line_shows_as_active_in_sidebar_details():

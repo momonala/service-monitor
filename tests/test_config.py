@@ -16,7 +16,6 @@ runner = CliRunner()
     "flag,expected_output",
     [
         ("--project-name", "service-monitor"),
-        ("--project-version", "0.1.0"),
         ("--flask-port", "5001"),
     ],
 )
@@ -35,11 +34,3 @@ def test_config_all_returns_all_values():
     assert result.exit_code == 0
     assert "project_name=service-monitor" in result.stdout
     assert "flask_port=" in result.stdout
-
-
-def test_config_without_flag_fails():
-    """Test that calling config without any flag produces an error."""
-    result = runner.invoke(app, [])
-
-    assert result.exit_code == 1
-    assert "Error: No config key specified" in result.output

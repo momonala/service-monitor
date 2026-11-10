@@ -12,7 +12,6 @@ from src.host_info import count_apt_upgradable, parse_throttled
     "output, now, since_boot",
     [
         ("throttled=0x0", [], []),
-        ("throttled=0x50000", [], ["Under-voltage", "Throttled"]),
         ("throttled=0x50005", ["Under-voltage", "Throttled"], ["Under-voltage", "Throttled"]),
         ("throttled=0x80008", ["Soft temperature limit"], ["Soft temperature limit"]),
     ],

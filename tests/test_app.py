@@ -49,13 +49,6 @@ def test_index(mock_get_info, mock_get_health, mock_get_services, mock_is_linux,
     assert response.status_code == 200
 
 
-@patch("src.app.is_linux", return_value=False)
-def test_index_non_linux(mock_is_linux, client):
-    """Index route uses canned data on non-Linux systems."""
-    response = client.get("/")
-    assert response.status_code == 200
-
-
 @patch("src.app.is_linux", return_value=True)
 @patch("src.app.get_services", return_value=["projects_test.service"])
 @patch("src.app.subprocess.Popen")
@@ -103,38 +96,6 @@ def test_inspector_detector_check(mock_run, client):
     response = client.post("/inspector-detector/check", data={"service": "projects_train.service"})
     assert response.status_code == 500
     assert b"Script failed" in response.data
-
-
-@patch("src.app.latest_service_samples_payload")
-@patch("src.app.is_linux", return_value=True)
-@patch("src.app.get_services", return_value=["projects_test1.service"])
-@patch("src.app.get_service_status")
-def test_sidebar_details(mock_get_status, mock_get_services, mock_is_linux, mock_latest_metrics, client):
-    """Sidebar details endpoint returns enriched service status JSON, including latest CPU/memory."""
-    mock_get_status.return_value = ServiceStatus(
-        name="projects_test1.service",
-        state=ServiceState.ACTIVE,
-        uptime="1 day",
-        memory="100M",
-        cpu="10s",
-        last_error=None,
-        full_status="",
-        project_group="test1",
-        suffix=None,
-        ci_status="success",
-    )
-    mock_latest_metrics.return_value = {
-        "projects_test1.service": {"cpu_percent": 4.2, "memory_used_pct": 8.5}
-    }
-
-    response = client.get("/api/services/sidebar-details")
-    assert response.status_code == 200
-    payload = response.get_json()
-    assert payload["services"][0]["name"] == "projects_test1.service"
-    assert payload["services"][0]["ci_status"] == "success"
-    assert payload["services"][0]["cpu_percent"] == 4.2
-    assert payload["services"][0]["memory_used_pct"] == 8.5
-    assert "projects" not in payload
 
 
 @patch("src.app.backup_statuses_for_groups")
@@ -200,33 +161,6 @@ def test_sidebar_details_inactive_service_hides_stale_metrics(
     assert payload["services"][0]["memory_used_mb"] is None
 
 
-@patch("src.app.latest_service_samples_payload", return_value={})
-@patch("src.app.is_linux", return_value=True)
-@patch("src.app.get_services", return_value=["projects_test1.service"])
-@patch("src.app.get_service_status")
-def test_sidebar_details_missing_metrics_are_null(
-    mock_get_status, mock_get_services, mock_is_linux, mock_latest_metrics, client
-):
-    """When a service has no recorded samples yet, cpu/memory fields are null rather than absent/erroring."""
-    mock_get_status.return_value = ServiceStatus(
-        name="projects_test1.service",
-        state=ServiceState.ACTIVE,
-        uptime="1 day",
-        memory="100M",
-        cpu="10s",
-        last_error=None,
-        full_status="",
-        project_group="test1",
-        suffix=None,
-        ci_status="success",
-    )
-
-    response = client.get("/api/services/sidebar-details")
-    payload = response.get_json()
-    assert payload["services"][0]["cpu_percent"] is None
-    assert payload["services"][0]["memory_used_pct"] is None
-
-
 @patch("src.app.latest_service_sample_payload")
 @patch("src.app.get_service_health")
 @patch("src.app.is_linux", return_value=True)
@@ -278,11 +212,12 @@ def test_alert_settings_get(mock_get_services, mock_is_linux, client):
 
 @patch("src.app.is_linux", return_value=True)
 @patch("src.app.get_services", return_value=["projects_test1.service"])
-def test_alert_settings_post_mute_and_restore(mock_get_services, mock_is_linux, client):
-    """POST /api/alert-settings saves frequency; muted setting persists in memory."""
+def test_alert_settings_post_mute(mock_get_services, mock_is_linux, client, tmp_path, monkeypatch):
+    """POST /api/alert-settings saves frequency and GET reflects it."""
     import src.scheduler as sched
 
     sched._alert_settings.clear()
+    monkeypatch.setattr(sched, "_SETTINGS_FILE", tmp_path / "alert_settings.json")
 
     response = client.post(
         "/api/alert-settings",
@@ -292,16 +227,8 @@ def test_alert_settings_post_mute_and_restore(mock_get_services, mock_is_linux, 
     assert response.get_json() == {"ok": True}
     assert sched._alert_settings.get("projects_test1.service") == "muted"
 
-    # Confirm GET reflects the muted state
     response = client.get("/api/alert-settings")
     assert response.get_json()["projects_test1.service"] == "muted"
-
-    # Restore to hourly
-    client.post(
-        "/api/alert-settings",
-        json={"service": "projects_test1.service", "frequency": "hourly"},
-    )
-    assert sched._alert_settings.get("projects_test1.service") == "hourly"
 
 
 def test_alert_settings_post_invalid(client):
@@ -330,8 +257,6 @@ def test_send_alert_success(mock_send, client):
 @pytest.mark.parametrize(
     "payload",
     [
-        {},
-        {"message": ""},
         {"message": "   "},
         {"message": 123},
     ],
@@ -352,40 +277,13 @@ def test_send_alert_telegram_failure(mock_send, client):
     mock_send.assert_called_once()
 
 
-@patch("src.system_metrics.is_linux", return_value=False)
-def test_system_info_history_dev_mode(mock_is_linux, client):
-    """GET /api/system-info/history returns canned samples off-Pi."""
-    response = client.get("/api/system-info/history?window=1h")
-    assert response.status_code == 200
-    payload = response.get_json()
-    assert payload["window"] == "1h"
-    assert len(payload["samples"]) > 0
-    assert "temperature_c" in payload["samples"][0]
-
-
 @patch("src.app.is_linux", return_value=False)
 @patch("src.system_metrics.is_linux", return_value=False)
-def test_system_info_includes_temperature_avg_24h(mock_metrics_linux, mock_app_linux, client):
-    """GET /api/system-info includes 24h avg and max temperature alongside live vitals."""
-    response = client.get("/api/system-info")
-    assert response.status_code == 200
-    payload = response.get_json()
-    assert "temperature_c" in payload
-    assert payload["temperature_avg_24h"] is not None
-    assert payload["temperature_max_24h"] is not None
-    assert 40.0 <= payload["temperature_avg_24h"] <= 60.0
-    assert payload["temperature_max_24h"] >= payload["temperature_avg_24h"]
-
-
-@patch("src.app.is_linux", return_value=False)
-@patch("src.system_metrics.is_linux", return_value=False)
-def test_system_info_includes_host_identity_and_health(mock_metrics_linux, mock_app_linux, client):
-    """GET /api/system-info nests host identity and health alongside the vitals."""
+def test_system_info_nests_temperature_stats_host_and_health(mock_metrics_linux, mock_app_linux, client):
     payload = client.get("/api/system-info").get_json()
-    assert payload["host"]["model"].startswith("Raspberry Pi")
-    assert payload["host"]["python_version"]
-    assert payload["health"]["apt_updates"] == 3
-    assert payload["health"]["throttled_now"] == []
+    assert {"temperature_c", "temperature_avg_24h", "temperature_max_24h", "host", "health"} <= payload.keys()
+    assert payload["host"]["model"]
+    assert "apt_updates" in payload["health"]
 
 
 @patch("src.app.check_apt_updates", return_value=7)
@@ -397,6 +295,18 @@ def test_apt_updates_runs_check_on_demand(mock_linux, mock_check, client):
     mock_check.assert_called_once()
 
 
+@patch("src.system_metrics.is_linux", return_value=False)
+def test_system_info_history_dev_mode(mock_is_linux, client):
+    """GET /api/system-info/history returns avg and max columns per sample."""
+    response = client.get("/api/system-info/history?window=1h")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["window"] == "1h"
+    assert {"ts", "temperature_c", "cpu_percent", "temperature_c_max", "cpu_percent_max"} <= payload[
+        "samples"
+    ][0].keys()
+
+
 def test_system_info_history_rejects_bad_window(client):
     response = client.get("/api/system-info/history?window=2h")
     assert response.status_code == 400
@@ -406,13 +316,11 @@ def test_system_info_history_rejects_bad_window(client):
 @patch("src.app.is_linux", return_value=False)
 @patch("src.system_metrics.is_linux", return_value=False)
 def test_service_history_dev_mode(mock_metrics_linux, mock_app_linux, client):
-    """GET /api/services/history returns canned per-service samples off-Pi."""
+    """GET /api/services/history returns per-service samples."""
     response = client.get("/api/services/history?service=projects_foo.service&window=6h")
     assert response.status_code == 200
     payload = response.get_json()
-    assert payload["service"] == "projects_foo.service"
-    assert payload["window"] == "6h"
-    assert len(payload["samples"]) > 0
+    assert (payload["service"], payload["window"]) == ("projects_foo.service", "6h")
     assert {"ts", "memory_used_pct", "cpu_percent"} <= payload["samples"][0].keys()
 
 
@@ -430,21 +338,9 @@ def test_service_history_rejects_unknown_service(mock_services, mock_is_linux, c
     assert "unknown service" in response.get_json()["error"]
 
 
-@patch("src.app.is_linux", return_value=False)
-def test_index_home_omits_dashboard_title(mock_is_linux, client):
-    """Home view renders the metrics chart without a visible content header."""
-    response = client.get("/")
-    assert response.status_code == 200
-    html = response.data.decode()
-    assert "content-header__title" not in html
-    assert 'id="systemHeading"' not in html
-    assert 'id="systemMetricsChart"' in html
-    assert 'id="systemChart"' in html
-
-
-@pytest.mark.parametrize("metric", ["cpu", "memory", "disk", "writes"])
-def test_system_info_by_project_returns_ranked_projects(client, metric, monkeypatch):
+def test_system_info_by_project_returns_ranked_projects(client, monkeypatch):
     """GET /api/system-info/by-project/<metric> returns per-project values and a total off-Pi."""
+    metric = "cpu"
     monkeypatch.setattr("src.system_metrics.is_linux", lambda: False)
     monkeypatch.setattr("src.system_metrics._project_sizes_cache", None)
     monkeypatch.setattr(

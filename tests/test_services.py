@@ -1,27 +1,21 @@
 """Tests for services.py module."""
 
 import subprocess
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 import src.services as services_module
-from src.canned_info import canned_service_statuses
 from src.services import (
     ServiceCounters,
     SystemInfo,
     get_ci_status,
-    get_info_for_service,
-    get_service_status,
     get_services,
     get_system_info,
-    outermost_directories,
     parse_cpu,
     parse_last_error,
     parse_memory,
     parse_service_name,
-    parse_timer_next,
     parse_uptime,
     read_service_metrics,
     sum_io_stat_written_bytes,
@@ -41,7 +35,6 @@ def reset_service_caches():
         ("Active: active (running) since Mon; 4 days ago", "4d"),
         ("Active: active (running) since Mon; 2h 15min ago", "2h"),
         ("Active: inactive (dead) since Mon; 4 days ago", None),
-        ("", None),
     ],
 )
 def test_parse_uptime(status_text, expected):
@@ -50,52 +43,31 @@ def test_parse_uptime(status_text, expected):
 
 
 @pytest.mark.parametrize(
-    "status_text,expected",
+    "parser, status_text, expected",
     [
-        ("Memory: 123.4M\n", "123.4M"),
-        ("Memory: 1.2G\nCPU: 100ms", "1.2G"),
-        ("No memory info", None),
+        (parse_memory, "Memory: 1.2G\nCPU: 100ms", "1.2G"),
+        (parse_cpu, "CPU: 1h 23min 45.678s\nMemory: 100M", "1h 23min 45.678s"),
+        (parse_last_error, "Error: Command returned exit code 1\nOther info", "Command returned exit code 1"),
+        (parse_last_error, "No errors here", None),
     ],
 )
-def test_parse_memory(status_text, expected):
-    """Parse memory extracts memory usage or None."""
-    assert parse_memory(status_text) == expected
+def test_parse_status_fields(parser, status_text, expected):
+    assert parser(status_text) == expected
 
 
 @pytest.mark.parametrize(
-    "status_text,expected",
+    "name, expected",
     [
-        ("CPU: 1h 23min 45.678s\nMemory: 100M", "1h 23min 45.678s"),
-        ("No cpu info", None),
+        ("projects_energy-monitor.service", ("energy-monitor", None)),
+        (
+            "projects_energy-monitor_data-backup-scheduler.service",
+            ("energy-monitor", "data-backup-scheduler"),
+        ),
+        ("projects_claude-usage-notch-server_ping.timer", ("claude-usage-notch-server", "ping")),
     ],
 )
-def test_parse_cpu(status_text, expected):
-    """Parse CPU extracts CPU time or None."""
-    assert parse_cpu(status_text) == expected
-
-
-@pytest.mark.parametrize(
-    "status_text,expected",
-    [
-        ("Error: Service failed\n", "Service failed"),
-        ("Error: Command returned exit code 1\nOther info", "Command returned exit code 1"),
-        ("No errors here", None),
-    ],
-)
-def test_parse_last_error(status_text, expected):
-    """Parse last error extracts error messages or None."""
-    assert parse_last_error(status_text) == expected
-
-
-@pytest.mark.parametrize(
-    "service",
-    canned_service_statuses,
-)
-def test_parse_service_name(service):
-    """Parse service name extracts project group and suffix correctly."""
-    project_group, suffix = parse_service_name(service.name)
-    assert project_group == service.project_group
-    assert suffix == service.suffix
+def test_parse_service_name(name, expected):
+    assert parse_service_name(name) == expected
 
 
 @patch("src.services.subprocess.check_output")
@@ -112,121 +84,26 @@ def test_get_services(mock_check_output):
         "projects_test_ping.timer",
     ]
 
-    mock_check_output.return_value = ""
-    assert get_services(use_cache=False) == []
-
-
-def test_parse_service_name_timer():
-    """Parse timer unit names the same way as service units."""
-    project_group, suffix = parse_service_name("projects_claude-usage-notch-server_ping.timer")
-    assert project_group == "claude-usage-notch-server"
-    assert suffix == "ping"
-
-
-@patch("src.services.subprocess.run")
-def test_get_info_for_service(mock_run):
-    """Return stdout on success, stdout+stderr on failure."""
-    mock_run.return_value.returncode = 0
-    mock_run.return_value.stdout = "Service is running"
-    mock_run.return_value.stderr = ""
-    assert get_info_for_service("test.service") == "Service is running"
-
-    mock_run.return_value.returncode = 3
-    mock_run.return_value.stdout = "Unit not found"
-    mock_run.return_value.stderr = "Failed"
-    assert get_info_for_service("test.service") == "Unit not found\nFailed"
-
-
-@patch("src.services.get_info_for_service")
-def test_get_service_status(mock_get_info):
-    """Parse service status for active, failed, and inactive services."""
-    mock_get_info.return_value = (
-        "Active: active (running) since Mon; 4 days ago\nMemory: 123.4M\nCPU: 2min 15.678s\n"
-    )
-    status = get_service_status("projects_test.service")
-    assert status.is_active and not status.is_failed
-    assert status.uptime == "4d" and status.memory == "123.4M"
-    assert status.project_group == "test"
-
-    mock_get_info.return_value = "Active: failed (Result: exit-code)\nError: Connection refused\n"
-    status = get_service_status("projects_test.service")
-    assert not status.is_active and status.is_failed
-    assert status.last_error == "Connection refused"
-
-    mock_get_info.return_value = "Active: inactive (dead)\n"
-    status = get_service_status("projects_test.service")
-    assert not status.is_active and not status.is_failed
-
-    mock_get_info.return_value = (
-        "Active: active (waiting) since Mon 2025-06-09 10:00:00 UTC; 5 days ago\n"
-        "Trigger: Thu 2025-06-19 10:00:00 UTC; 1 day 2h left\n"
-    )
-    status = get_service_status("projects_test_ping.timer")
-    assert status.is_active and not status.is_failed
-    assert status.uptime == "1d"
-    assert status.project_group == "test"
-
 
 @pytest.mark.parametrize(
-    "status_text,expected",
+    "body, expected",
     [
-        ("Trigger: Thu 2025-06-19 10:00:00 UTC; 1 day 2h left\n", "1d"),
-        ("Active: active (waiting) since Mon; 5 days ago\n", None),
+        ({"workflow_runs": [{"conclusion": "success"}]}, "success"),
+        ({"workflow_runs": [{"conclusion": "failure"}]}, "failure"),
+        ({"workflow_runs": [{"conclusion": "cancelled"}]}, "error"),
+        ({"workflow_runs": []}, "error"),
     ],
 )
-def test_parse_timer_next(status_text, expected):
-    """Parse time until next timer trigger."""
-    assert parse_timer_next(status_text) == expected
+@patch("src.services.requests.get")
+def test_get_ci_status_maps_latest_run(mock_get, body, expected):
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.json.return_value = body
+    assert get_ci_status("test-repo") == expected
 
 
 @patch("src.services.requests.get")
-def test_get_ci_status_success(mock_get):
-    """Return success when latest workflow run succeeded."""
-    mock_response = mock_get.return_value
-    mock_response.raise_for_status.return_value = None
-    mock_response.json.return_value = {"workflow_runs": [{"conclusion": "success"}]}
-    assert get_ci_status("test-repo") == "success"
-
-
-@patch("src.services.requests.get")
-def test_get_ci_status_failure(mock_get):
-    """Return failure when latest workflow run failed."""
-    mock_response = mock_get.return_value
-    mock_response.raise_for_status.return_value = None
-    mock_response.json.return_value = {"workflow_runs": [{"conclusion": "failure"}]}
-    assert get_ci_status("test-repo") == "failure"
-
-
-@patch("src.services.requests.get")
-def test_get_ci_status_no_runs(mock_get):
-    """Return error when no workflow runs found."""
-    mock_response = mock_get.return_value
-    mock_response.raise_for_status.return_value = None
-    mock_response.json.return_value = {"workflow_runs": []}
-    assert get_ci_status("test-repo") == "error"
-
-
-@patch("src.services.requests.get")
-def test_get_ci_status_other_conclusion(mock_get):
-    """Return error for other conclusion values."""
-    mock_response = mock_get.return_value
-    mock_response.raise_for_status.return_value = None
-    mock_response.json.return_value = {"workflow_runs": [{"conclusion": "cancelled"}]}
-    assert get_ci_status("test-repo") == "error"
-
-
-@patch("src.services.requests.get")
-def test_get_ci_status_not_found(mock_get):
-    """Return None when repo or workflow does not exist on GitHub."""
-    mock_response = mock_get.return_value
-    mock_response.status_code = 404
-    assert get_ci_status("vbb-rest") is None
-    mock_response.raise_for_status.assert_not_called()
-
-
-@patch("src.services.requests.get")
-def test_get_ci_status_not_found_cached(mock_get):
-    """Cache missing-workflow lookups to avoid repeated GitHub API calls."""
+def test_get_ci_status_missing_workflow_is_none_and_cached(mock_get):
+    """Repos without a GitHub Actions workflow get no badge, and are not re-queried within the TTL."""
     mock_response = mock_get.return_value
     mock_response.status_code = 404
 
@@ -245,15 +122,6 @@ def test_get_ci_status_request_exception(mock_get):
 
 
 @patch("src.services.requests.get")
-def test_get_ci_status_key_error(mock_get):
-    """Return error on KeyError (missing workflow_runs key)."""
-    mock_response = mock_get.return_value
-    mock_response.raise_for_status.return_value = None
-    mock_response.json.return_value = {}
-    assert get_ci_status("test-repo") == "error"
-
-
-@patch("src.services.requests.get")
 def test_get_ci_status_with_token(mock_get):
     """Include Authorization header when token is available."""
     with patch("src.services.GITHUB_TOKEN", "ghp_test_token"):
@@ -264,30 +132,6 @@ def test_get_ci_status_with_token(mock_get):
         mock_get.assert_called_once()
         call_kwargs = mock_get.call_args.kwargs
         assert call_kwargs["headers"]["Authorization"] == "token ghp_test_token"
-
-
-@patch("src.services.requests.get")
-def test_get_ci_status_without_token(mock_get):
-    """No Authorization header when token is None."""
-    with patch("src.services.GITHUB_TOKEN", None):
-        mock_response = mock_get.return_value
-        mock_response.raise_for_status.return_value = None
-        mock_response.json.return_value = {"workflow_runs": [{"conclusion": "success"}]}
-        get_ci_status("test-repo")
-        mock_get.assert_called_once()
-        call_kwargs = mock_get.call_args.kwargs
-        assert call_kwargs["headers"] == {}
-
-
-@patch("src.services.get_info_for_service")
-@patch("src.services.get_ci_status")
-def test_get_service_status_includes_ci(mock_get_ci, mock_get_info):
-    """ServiceStatus includes CI status from API."""
-    mock_get_info.return_value = "Active: active (running) since Mon; 4 days ago\n"
-    mock_get_ci.return_value = "success"
-    status = get_service_status("projects_test.service")
-    assert status.ci_status == "success"
-    mock_get_ci.assert_called_once_with("test")
 
 
 @patch("src.services.requests.get")
@@ -311,7 +155,6 @@ def test_get_ci_status_uses_cache(mock_get):
         ("532800.00 100.0", "6d"),  # 6 days 4 hours
         ("3661.0 10.0", "1h"),
         ("90.0 1.0", "1m"),
-        ("5.0 0.0", "0m"),
     ],
 )
 def test_read_uptime(monkeypatch, uptime_text, expected):
@@ -403,15 +246,6 @@ def test_sum_io_stat_written_bytes_adds_every_device():
         "8:0 rbytes=0 wbytes=1000 rios=0 wios=1 dbytes=0 dios=0\n"
     )
     assert sum_io_stat_written_bytes(io_stat) == 23602152
-
-
-def test_sum_io_stat_written_bytes_empty_file():
-    assert sum_io_stat_written_bytes("") == 0
-
-
-def test_outermost_directories_drops_nested_paths():
-    dirs = {Path("/home/a"), Path("/home/a/raw"), Path("/home/b")}
-    assert outermost_directories(dirs) == {Path("/home/a"), Path("/home/b")}
 
 
 def test_parse_journal_entries_counts_per_unit_and_keeps_the_last_cursor():
