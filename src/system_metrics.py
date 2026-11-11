@@ -262,6 +262,33 @@ class CounterDeltaTracker:
             del self._prev[key]
 
 
+class ServiceWriteTracker:
+    """Turn each unit's cumulative cgroup write counter into per-sample deltas, across restarts.
+
+    A unit's counter starts at zero with each run, so a run that began since the last sample counts
+    in full. A unit's first-ever reading gives None: its run may have started long before.
+    """
+
+    def __init__(self) -> None:
+        self._last: dict[str, tuple[str | None, int | None]] = {}
+
+    def delta(self, unit: str, invocation_id: str | None, written: int | None) -> int | None:
+        previous = self._last.get(unit)
+        self._last[unit] = (invocation_id, written)
+        if previous is None or written is None:
+            return None
+        previous_invocation, previous_written = previous
+        if invocation_id != previous_invocation:
+            return written
+        if previous_written is None or written < previous_written:
+            return None
+        return written - previous_written
+
+    def forget(self, live_units: set[str]) -> None:
+        for unit in [u for u in self._last if u not in live_units]:
+            del self._last[unit]
+
+
 class ProcessWriteTracker:
     """Per-interval writes summed over a changing set of processes.
 
@@ -290,7 +317,7 @@ def _kb(byte_count: int | None) -> float | None:
 def sample_services(
     units: list[str],
     cpu_tracker: ServiceCpuTracker,
-    write_tracker: CounterDeltaTracker,
+    write_tracker: ServiceWriteTracker,
     cpu_count: int | None,
     total_memory_bytes: int | None,
     ts: float | None = None,
@@ -299,6 +326,7 @@ def sample_services(
 
     Memory and CPU are a percent of the whole host: memory of total RAM, CPU of all cores. CPU
     percent and written KB are None on a service's first sample (no prior counter to diff against).
+    Written KB covers restarts: a run that started since the last sample counts in full.
     """
     ts = time.time() if ts is None else ts
     metrics = read_service_metrics(units)
@@ -312,7 +340,7 @@ def sample_services(
                 service=unit,
                 memory_used_pct=service_memory_percent(counters.memory_bytes, total_memory_bytes),
                 cpu_percent=cpu_tracker.read_percent(unit, counters.cpu_nsec, ts, cpu_count),
-                written_kb=_kb(write_tracker.delta(unit, counters.written_bytes)),
+                written_kb=_kb(write_tracker.delta(unit, counters.invocation_id, counters.written_bytes)),
             )
         )
     return samples
@@ -414,7 +442,7 @@ def metrics_sampler_loop(
     aggregator = MetricsAggregator(ticks_per_sample=ticks_per_sample)
     cpu_tracker = CpuDeltaTracker()
     service_cpu_tracker = ServiceCpuTracker()
-    service_write_tracker = CounterDeltaTracker()
+    service_write_tracker = ServiceWriteTracker()
     host_write_tracker = CounterDeltaTracker()
     claude_write_tracker = ProcessWriteTracker()
     journal_tracker = JournalEntryTracker()

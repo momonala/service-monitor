@@ -14,6 +14,7 @@ from src.system_metrics import (
     ProcessWriteTracker,
     ServiceCpuTracker,
     ServiceSample,
+    ServiceWriteTracker,
     SystemSample,
     attach_log_entries,
     average_ticks,
@@ -350,7 +351,7 @@ def test_sample_services_reads_memory_and_cpu(monkeypatch):
     samples = sample_services(
         list(metrics),
         tracker,
-        CounterDeltaTracker(),
+        ServiceWriteTracker(),
         cpu_count=4,
         total_memory_bytes=2000 * 1024 * 1024,
         ts=100.0,
@@ -384,7 +385,7 @@ def test_sample_services_reports_written_kb_between_samples(monkeypatch):
     monkeypatch.setattr(
         "src.system_metrics.read_service_metrics", lambda units: {"projects_foo.service": next(readings)}
     )
-    cpu_tracker, write_tracker = ServiceCpuTracker(), CounterDeltaTracker()
+    cpu_tracker, write_tracker = ServiceCpuTracker(), ServiceWriteTracker()
     args = (["projects_foo.service"], cpu_tracker, write_tracker, 4, 1024)
 
     sample_services(*args, ts=100.0)
@@ -404,6 +405,21 @@ def test_sample_services_reports_written_kb_between_samples(monkeypatch):
 def test_counter_delta_tracker(readings, expected):
     tracker = CounterDeltaTracker()
     assert [tracker.delta("k", value) for value in readings] == expected
+
+
+@pytest.mark.parametrize(
+    "readings, expected",
+    [
+        ([("a", 100), ("a", 150)], [None, 50]),
+        ([("a", 100), ("b", 40)], [None, 40]),
+        ([("a", 100), ("b", 400)], [None, 400]),
+        ([("a", 100), ("a", None), ("b", 30)], [None, None, 30]),
+        ([("a", 100), ("a", None), ("a", 120)], [None, None, None]),
+    ],
+)
+def test_service_write_tracker_counts_a_new_run_in_full(readings, expected):
+    tracker = ServiceWriteTracker()
+    assert [tracker.delta("u", invocation, written) for invocation, written in readings] == expected
 
 
 def _record_writes(store: MetricsStore, ts: float, host_kb: float | None, foo_kb: float | None) -> None:

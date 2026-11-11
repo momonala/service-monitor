@@ -370,12 +370,13 @@ class ServiceCounters:
 
     memory_bytes is anonymous memory (heap + stack) from the cgroup's memory.stat, which excludes
     reclaimable file page cache. cpu_nsec (CPUUsageNSec) and written_bytes (io.stat wbytes, summed
-    over devices) are cumulative since the unit started.
+    over devices) are cumulative since the unit started. invocation_id changes on every start.
     """
 
     memory_bytes: int | None = None
     cpu_nsec: int | None = None
     written_bytes: int | None = None
+    invocation_id: str | None = None
 
 
 def _systemctl_show(units: list[str], properties: list[str]) -> dict[str, dict[str, str]]:
@@ -412,7 +413,7 @@ def _systemctl_show(units: list[str], properties: list[str]) -> dict[str, dict[s
 def read_service_metrics(units: list[str]) -> dict[str, ServiceCounters]:
     """Return {unit: ServiceCounters} for the given units in one systemctl call."""
     try:
-        shown = _systemctl_show(units, ["ControlGroup", "CPUUsageNSec"])
+        shown = _systemctl_show(units, ["ControlGroup", "CPUUsageNSec", "InvocationID"])
     except subprocess.CalledProcessError as exc:
         logger.warning("systemctl show failed: %s", exc.stderr.strip())
         return {}
@@ -423,6 +424,7 @@ def read_service_metrics(units: list[str]) -> dict[str, ServiceCounters]:
             memory_bytes=_read_cgroup_anon(cgroup) if cgroup else None,
             cpu_nsec=_parse_systemd_counter(raw_values.get("CPUUsageNSec", "")),
             written_bytes=read_cgroup_written_bytes(cgroup) if cgroup else None,
+            invocation_id=raw_values.get("InvocationID") or None,
         )
     for unit in units:
         metrics.setdefault(unit, ServiceCounters())
