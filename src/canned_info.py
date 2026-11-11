@@ -36,22 +36,34 @@ canned_host_health = HostHealth(
     tunnel_active=True,
 )
 
-websites = [
-    {"name": "cycle-tracker", "url": "https://cycle-tracker.mnalavadi.org"},
-    {"name": "task-manager", "url": "https://task-manager.mnalavadi.org"},
-    {"name": "energy-monitor", "url": "https://energy-monitor.mnalavadi.org"},
-    {"name": "usc-vis", "url": "https://usc-vis.mnalavadi.org"},
-    {"name": "incognita", "url": "https://incognita.mnalavadi.org"},
-    {"name": "trainspotter", "url": "https://trainspotter.mnalavadi.org"},
-    {"name": "inspector-detector", "url": "https://inspectordetector.mnalavadi.org"},
-    {"name": "pingpong", "url": "https://pingpong.mnalavadi.org"},
-    {"name": "Trace", "url": "https://trace.mnalavadi.org"},
-    {"name": "spyglass", "url": "https://spyglass.mnalavadi.org"},
-    {"name": "What's On the Menu?", "url": "https://whats-on-the-menu.mnalavadi.org"},
-    {"name": "personal-finances", "url": "https://personal-finances.mnalavadi.org"},
-    {"name": "my-cloud", "url": "https://my-cloud.mnalavadi.org"},
+canned_websites = [
+    {
+        "name": "claude-usage-notch-server",
+        "project": "claude-usage-notch-server",
+        "url": "https://claude-usage-notch-server.mnalavadi.org",
+    },
+    {"name": "cycle-tracker", "project": "cycle-tracker", "url": "https://cycle-tracker.mnalavadi.org"},
+    {"name": "energy-monitor", "project": "energy-monitor", "url": "https://energy-monitor.mnalavadi.org"},
+    {"name": "incognita", "project": "incognita", "url": "https://incognita.mnalavadi.org"},
+    {
+        "name": "inspectordetector",
+        "project": "inspector-detector",
+        "url": "https://inspectordetector.mnalavadi.org",
+    },
+    {"name": "my-cloud", "project": "my-cloud", "url": "https://my-cloud.mnalavadi.org"},
+    {
+        "name": "personal-finances",
+        "project": "personal-finances",
+        "url": "https://personal-finances.mnalavadi.org",
+    },
+    {"name": "pingpong", "project": "pingpong", "url": "https://pingpong.mnalavadi.org"},
+    {"name": "spyglass", "project": "spyglass", "url": "https://spyglass.mnalavadi.org"},
+    {"name": "surprise", "project": "surprise", "url": "https://surprise.mnalavadi.org"},
+    {"name": "task-manager", "project": "task-manager", "url": "https://task-manager.mnalavadi.org"},
+    {"name": "trace", "project": "incognita", "url": "https://trace.mnalavadi.org"},
+    {"name": "trainspotter", "project": "trainspotter", "url": "https://trainspotter.mnalavadi.org"},
+    {"name": "usc-vis", "project": "usc-vis", "url": "https://usc-vis.mnalavadi.org"},
 ]
-websites.sort(key=lambda x: x["name"].lower())
 
 # fmt: off
 canned_service_statuses = [

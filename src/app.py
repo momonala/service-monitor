@@ -19,7 +19,7 @@ from src.canned_info import (
     canned_host_identity,
     canned_service_statuses,
     canned_system_info,
-    websites,
+    canned_websites,
 )
 from src.config import FLASK_PORT
 from src.env import INSPECTOR_DETECTOR_CWD, INSPECTOR_DETECTOR_UV_PATH
@@ -55,6 +55,7 @@ from src.system_metrics import (
     temperature_window_stats,
 )
 from src.telegram import send_telegram_message
+from src.websites import get_websites
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -443,8 +444,10 @@ def index():
     if is_linux():
         services = get_services()
         service_statuses = _collect_statuses(services, get_service_health)
+        websites = get_websites(own_port=FLASK_PORT)
     else:
         service_statuses = canned_service_statuses
+        websites = canned_websites
 
     # lines=0: show only the systemctl status header (Active, Memory, CPU).
     # Log lines are streamed live via the /logs/stream SSE endpoint.

@@ -30,6 +30,7 @@ from src.services import (
     cpu_percent_from_delta,
     get_services,
     is_linux,
+    is_project_unit,
     outermost_directories,
     parse_service_name,
     read_cgroup_written_bytes,
@@ -377,10 +378,6 @@ def attach_log_entries(
         ServiceSample(ts, unit, None, None, log_entries=count)
         for unit, count in sorted(project_entries.items())
     ]
-
-
-def is_project_unit(unit: str) -> bool:
-    return unit.startswith("projects_")
 
 
 def backfill_journal_entries(store: MetricsStore, now: float) -> int:

@@ -77,6 +77,10 @@ class ServiceStatus:
         return stem
 
 
+def is_project_unit(unit: str) -> bool:
+    return unit.startswith("projects_")
+
+
 def parse_service_name(service_name: str) -> tuple[str, str | None]:
     """Parse unit name to extract project group and optional suffix.
 
