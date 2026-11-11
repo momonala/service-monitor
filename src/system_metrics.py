@@ -5,6 +5,7 @@ both the average and the max of those ticks for each metric.
 """
 
 import atexit
+import bisect
 import logging
 import math
 import os
@@ -34,6 +35,7 @@ from src.services import (
     read_cgroup_written_bytes,
     read_directory_size_kb,
     read_journal_entries,
+    read_journal_entry_times,
     read_process_written_bytes,
     read_root_sectors_written,
     read_service_metrics,
@@ -56,6 +58,7 @@ WINDOWS: dict[str, int] = {
     "7d": RETENTION_SECONDS,
 }
 WRITES_WINDOW = "24h"
+BACKFILL_CHUNK_TICKS = 500
 PROJECT_SIZES_TTL_SECONDS = 30 * 60
 WINDOW_ROLLUP_SECONDS: dict[str, int] = {
     "1h": 30,
@@ -321,38 +324,63 @@ class JournalEntryTracker:
     def __init__(self) -> None:
         self._cursor: str | None = None
 
-    def read(self, ts: float) -> dict[str, int]:
-        """Entries per unit since the last read. A failed read drops the cursor so the next one starts fresh."""
+    def read(self, ts: float) -> dict[str, int] | None:
+        """Entries per unit since the last read, or None when journalctl failed (the next read starts fresh)."""
         result = read_journal_entries(self._cursor, since_ts=ts - SAMPLE_INTERVAL_SECONDS)
         if result is None:
             self._cursor = None
-            return {}
+            return None
         counts, cursor = result
         if cursor is not None:
             self._cursor = cursor
         return counts
 
 
-def attribute_log_writes(
-    services: list[ServiceSample], entries: dict[str, int], journald_kb: float | None, ts: float
+def attach_log_entries(
+    services: list[ServiceSample], entries: dict[str, int], ts: float
 ) -> list[ServiceSample]:
-    """Split journald's written KB across project units in proportion to the entries each logged.
+    """Record each project unit's journal entries for the tick; units not in ``services`` get a sample of their own.
 
-    Project units that logged but aren't in ``services`` (e.g. a oneshot that already exited) get a
-    sample of their own with only the log share set. Non-project entries keep the rest unattributed.
+    Units that logged but aren't sampled are usually oneshots that already exited.
     """
-    total_entries = sum(entries.values())
-    if journald_kb is None or not total_entries:
-        return services
-    shares = {
-        unit: round(journald_kb * count / total_entries, 1)
-        for unit, count in entries.items()
-        if unit.startswith("projects_")
-    }
-    attributed = [replace(s, log_written_kb=shares.pop(s.service, 0.0)) for s in services]
-    return attributed + [
-        ServiceSample(ts, unit, None, None, log_written_kb=kb) for unit, kb in sorted(shares.items())
+    project_entries = {unit: count for unit, count in entries.items() if is_project_unit(unit)}
+    counted = [replace(s, log_entries=project_entries.pop(s.service, 0)) for s in services]
+    return counted + [
+        ServiceSample(ts, unit, None, None, log_entries=count)
+        for unit, count in sorted(project_entries.items())
     ]
+
+
+def is_project_unit(unit: str) -> bool:
+    return unit.startswith("projects_")
+
+
+def backfill_journal_entries(store: MetricsStore, now: float) -> int:
+    """Count journal entries for stored ticks that lack them, from the journal itself. Returns ticks filled.
+
+    An entry belongs to the first tick at or after it, within one sample interval.
+    """
+    ticks = store.ticks_missing_journal_entries(now - RETENTION_SECONDS)
+    if not ticks:
+        return 0
+    journal = read_journal_entry_times(ticks[0] - SAMPLE_INTERVAL_SECONDS)
+    if journal is None:
+        return 0
+    counts: dict[int, dict[str, int]] = {ts: {} for ts in ticks}
+    for entry_ts, unit in journal:
+        index = bisect.bisect_left(ticks, entry_ts)
+        if index < len(ticks) and ticks[index] - entry_ts < SAMPLE_INTERVAL_SECONDS:
+            tick_counts = counts[ticks[index]]
+            tick_counts[unit] = tick_counts.get(unit, 0) + 1
+    for chunk_start in range(0, len(ticks), BACKFILL_CHUNK_TICKS):
+        chunk = ticks[chunk_start : chunk_start + BACKFILL_CHUNK_TICKS]
+        store.fill_journal_entries(
+            {
+                ts: (sum(counts[ts].values()), {u: c for u, c in counts[ts].items() if is_project_unit(u)})
+                for ts in chunk
+            }
+        )
+    return len(ticks)
 
 
 class MetricsAggregator:
@@ -390,6 +418,12 @@ def metrics_sampler_loop(
     host_write_tracker = CounterDeltaTracker()
     claude_write_tracker = ProcessWriteTracker()
     journal_tracker = JournalEntryTracker()
+    try:
+        filled = backfill_journal_entries(store, time.time())
+        if filled:
+            logger.info("Backfilled journal entry counts for %s metric samples", filled)
+    except Exception:
+        logger.exception("Failed to backfill journal entry counts")
     cpu_count = os.cpu_count()
     total_memory_bytes = read_total_memory_bytes()
     logger.info(
@@ -402,13 +436,12 @@ def metrics_sampler_loop(
             sample = aggregator.add_tick(read_metrics_tick(cpu_tracker))
             if sample is not None:
                 sectors = host_write_tracker.delta("root", read_root_sectors_written())
-                journald_kb = _kb(
-                    host_write_tracker.delta("journald", read_cgroup_written_bytes(JOURNALD_CGROUP))
-                )
                 sample = replace(
                     sample,
                     disk_written_kb=_kb(None if sectors is None else sectors * 512),
-                    journald_written_kb=journald_kb,
+                    journald_written_kb=_kb(
+                        host_write_tracker.delta("journald", read_cgroup_written_bytes(JOURNALD_CGROUP))
+                    ),
                     system_slice_written_kb=_kb(
                         host_write_tracker.delta("system", read_cgroup_written_bytes(SYSTEM_SLICE_CGROUP))
                     ),
@@ -419,6 +452,7 @@ def metrics_sampler_loop(
                         claude_write_tracker.delta(read_process_written_bytes(CLAUDE_PROCESS_NAME))
                     ),
                 )
+                entries = journal_tracker.read(sample.ts)
                 services = sample_services(
                     get_services(),
                     service_cpu_tracker,
@@ -427,9 +461,9 @@ def metrics_sampler_loop(
                     total_memory_bytes,
                     ts=sample.ts,
                 )
-                services = attribute_log_writes(
-                    services, journal_tracker.read(sample.ts), journald_kb, sample.ts
-                )
+                if entries is not None:
+                    sample = replace(sample, journal_entries=sum(entries.values()))
+                    services = attach_log_entries(services, entries, sample.ts)
                 store.append(make_tick(sample, services))
         except Exception:
             logger.exception("Failed to sample system metrics tick")
@@ -776,7 +810,7 @@ def _written_mb_split_by_project(
         start = now - window_seconds(WRITES_WINDOW)
         store = store or default_store()
         direct_kb = store.written_kb_by_service(start, now)
-        log_kb = store.log_written_kb_by_service(start, now)
+        log_kb = _log_written_kb_by_service(store, start, now)
     else:
         direct_kb = {unit: _canned_written_mb(unit) * 1024 for unit in get_services()}
         log_kb = {unit: _canned_written_mb(unit) * 512 for unit in get_services()}
@@ -787,6 +821,18 @@ def _written_mb_split_by_project(
     return to_mb(direct_kb), to_mb(log_kb)
 
 
+def _log_written_kb_by_service(store: MetricsStore, start: float, end: float) -> dict[str, float]:
+    """Split the window's journald writes by each unit's share of the window's journal entries.
+
+    The kernel writes journald's pages back about a minute after they're logged, so a single tick's
+    writes don't line up with that tick's entries.
+    """
+    journald_kb, entries, by_service = store.journal_attribution(start, end)
+    if not entries:
+        return {}
+    return {service: journald_kb * count / entries for service, count in by_service.items()}
+
+
 def _written_mb_outside_projects(now: float, store: MetricsStore | None) -> dict[str, float]:
     """Writes no project accounts for, by source. The subtracted rows are clamped at zero.
 
@@ -794,7 +840,10 @@ def _written_mb_outside_projects(now: float, store: MetricsStore | None) -> dict
     different layers, so the subtractions are estimates rather than exact remainders.
     """
     if is_linux():
-        totals_kb = (store or default_store()).written_kb_by_source(now - window_seconds(WRITES_WINDOW), now)
+        store = store or default_store()
+        start = now - window_seconds(WRITES_WINDOW)
+        totals_kb = store.written_kb_by_source(start, now)
+        totals_kb["project_log_kb"] = sum(_log_written_kb_by_service(store, start, now).values())
         disk, journald, system, user, claude, projects, project_logs = (
             totals_kb[key] / 1024
             for key in (
@@ -804,7 +853,7 @@ def _written_mb_outside_projects(now: float, store: MetricsStore | None) -> dict
                 "user_slice_written_kb",
                 "claude_written_kb",
                 "services_written_kb",
-                "services_log_written_kb",
+                "project_log_kb",
             )
         )
     else:

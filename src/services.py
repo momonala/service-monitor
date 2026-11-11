@@ -497,17 +497,38 @@ def read_journal_entries(
     Returns ({unit: entries}, cursor of the last entry read). Entries without a unit are keyed "".
     The cursor is None when nothing new was logged. Returns None when journalctl failed.
     """
-    cmd = ["journalctl", "--quiet", "--no-pager", "-o", "json", "--output-fields=_SYSTEMD_UNIT"]
-    cmd.append(f"--after-cursor={after_cursor}" if after_cursor else f"--since=@{int(since_ts)}")
+    output = _journalctl_json(
+        f"--after-cursor={after_cursor}" if after_cursor else f"--since=@{int(since_ts)}"
+    )
+    return None if output is None else parse_journal_entries(output)
+
+
+def read_journal_entry_times(since_ts: float) -> list[tuple[float, str]] | None:
+    """(epoch seconds, unit) of every journal entry since ``since_ts``. None when journalctl failed."""
+    output = _journalctl_json(f"--since=@{int(since_ts)}")
+    if output is None:
+        return None
+    entries = []
+    for line in output.splitlines():
+        try:
+            entry = json.loads(line)
+            entries.append((int(entry["__REALTIME_TIMESTAMP"]) / 1_000_000, entry.get("_SYSTEMD_UNIT") or ""))
+        except (ValueError, KeyError):
+            continue
+    return entries
+
+
+def _journalctl_json(selector: str) -> str | None:
+    cmd = ["journalctl", "--quiet", "--no-pager", "-o", "json", "--output-fields=_SYSTEMD_UNIT", selector]
     try:
         result = subprocess.run(cmd, text=True, capture_output=True, timeout=JOURNALCTL_TIMEOUT_SECONDS)
     except (subprocess.TimeoutExpired, OSError):
-        logger.warning("journalctl entry count failed")
+        logger.warning("journalctl failed")
         return None
     if result.returncode != 0:
-        logger.warning("journalctl entry count failed: %s", result.stderr.strip())
+        logger.warning("journalctl failed: %s", result.stderr.strip())
         return None
-    return parse_journal_entries(result.stdout)
+    return result.stdout
 
 
 def parse_journal_entries(json_lines: str) -> tuple[dict[str, int], str | None]:

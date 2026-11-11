@@ -36,6 +36,7 @@ _HOST_COLUMNS = (
     "system_slice_written_kb",
     "user_slice_written_kb",
     "claude_written_kb",
+    "journal_entries",
 )
 _WRITE_SOURCE_COLUMNS = (
     "disk_written_kb",
@@ -61,6 +62,7 @@ class SystemSample:
     system_slice_written_kb: float | None = None
     user_slice_written_kb: float | None = None
     claude_written_kb: float | None = None
+    journal_entries: int | None = None
 
 
 @dataclass(frozen=True)
@@ -72,7 +74,7 @@ class ServiceSample:
     memory_used_pct: float | None
     cpu_percent: float | None
     written_kb: float | None = None
-    log_written_kb: float | None = None
+    log_entries: int | None = None
 
 
 class ServiceReading(NamedTuple):
@@ -81,7 +83,15 @@ class ServiceReading(NamedTuple):
     memory_used_pct: float | None
     cpu_percent: float | None
     written_kb: float | None = None
-    log_written_kb: float | None = None
+    log_entries: int | None = None
+
+
+class JournalAttribution(NamedTuple):
+    """Journald's writes and journal entries over the ticks that have both, plus each unit's entries."""
+
+    journald_kb: float
+    entries: int
+    entries_by_service: dict[str, int]
 
 
 @dataclass(frozen=True)
@@ -100,7 +110,7 @@ def make_tick(system: SystemSample, services: list[ServiceSample]) -> Tick:
     return Tick(
         system=system,
         services={
-            s.service: ServiceReading(s.memory_used_pct, s.cpu_percent, s.written_kb, s.log_written_kb)
+            s.service: ServiceReading(s.memory_used_pct, s.cpu_percent, s.written_kb, s.log_entries)
             for s in services
         },
     )
@@ -220,20 +230,19 @@ class MetricsStore:
         """Total KB per write source, summed only over ticks where every host counter has a reading.
 
         Keys are the host write columns, ``claude_written_kb`` (zero where unread), plus
-        ``services_written_kb`` and ``services_log_written_kb``
-        (all services' direct and journald writes in those same ticks). Summing each over its own
+        ``services_written_kb`` (all services' direct writes in those same ticks). Summing each over its own
         ticks would let one with longer history, or a missed read, skew the differences between them.
         """
         not_null = " AND ".join(f"{column} IS NOT NULL" for column in _WRITE_SOURCE_COLUMNS)
         sums = ", ".join(f"COALESCE(SUM({column}), 0)" for column in _WRITE_SOURCE_COLUMNS)
         services_sum = "COALESCE(SUM((SELECT SUM(json_extract(value, '$[{}]')) FROM json_each(services))), 0)"
-        keys = (*_WRITE_SOURCE_COLUMNS, "claude_written_kb", "services_written_kb", "services_log_written_kb")
+        keys = (*_WRITE_SOURCE_COLUMNS, "claude_written_kb", "services_written_kb")
         with self._lock:
             stored = (
                 self._connection()
                 .execute(
                     f"SELECT {sums}, COALESCE(SUM(claude_written_kb), 0), "
-                    f"{services_sum.format(2)}, {services_sum.format(3)} "
+                    f"{services_sum.format(2)} "
                     f"FROM samples WHERE ts >= ? AND ts <= ? AND {not_null}",
                     (start, end),
                 )
@@ -249,7 +258,6 @@ class MetricsStore:
                     *host,
                     tick.system.claude_written_kb or 0.0,
                     sum(r.written_kb or 0.0 for r in readings),
-                    sum(r.log_written_kb or 0.0 for r in readings),
                 )
                 for key, value in zip(keys, values, strict=True):
                     totals[key] += value
@@ -281,9 +289,77 @@ class MetricsStore:
         """Total KB each service wrote in the window."""
         return self._sum_by_service("written_kb", start, end)
 
-    def log_written_kb_by_service(self, start: float, end: float) -> dict[str, float]:
-        """Total KB of journald writes attributed to each service in the window."""
-        return self._sum_by_service("log_written_kb", start, end)
+    def journal_attribution(self, start: float, end: float) -> JournalAttribution:
+        """Journald KB, journal entries and per-unit entries, summed over ticks that read both host values."""
+        counted = "journald_written_kb IS NOT NULL AND journal_entries IS NOT NULL"
+        with self._lock:
+            conn = self._connection()
+            journald_kb, entries = conn.execute(
+                "SELECT COALESCE(SUM(journald_written_kb), 0), COALESCE(SUM(journal_entries), 0) "
+                f"FROM samples WHERE ts >= ? AND ts <= ? AND {counted}",
+                (start, end),
+            ).fetchone()
+            by_service = dict(
+                conn.execute(
+                    "SELECT entry.key, SUM(json_extract(entry.value, '$[3]')) "
+                    "FROM samples, json_each(samples.services) AS entry "
+                    f"WHERE ts >= ? AND ts <= ? AND {counted} "
+                    "AND json_extract(entry.value, '$[3]') IS NOT NULL GROUP BY entry.key",
+                    (start, end),
+                ).fetchall()
+            )
+            for tick in self._buffer:
+                if not start <= tick.ts <= end or None in (
+                    tick.system.journald_written_kb,
+                    tick.system.journal_entries,
+                ):
+                    continue
+                journald_kb += tick.system.journald_written_kb
+                entries += tick.system.journal_entries
+                for service, reading in tick.services.items():
+                    if reading.log_entries is not None:
+                        by_service[service] = by_service.get(service, 0) + reading.log_entries
+        return JournalAttribution(journald_kb, entries, by_service)
+
+    def ticks_missing_journal_entries(self, start: float) -> list[int]:
+        """Stored ticks since ``start`` that read journald's writes but have no journal entry count."""
+        with self._lock:
+            rows = (
+                self._connection()
+                .execute(
+                    "SELECT ts FROM samples WHERE ts >= ? AND journald_written_kb IS NOT NULL "
+                    "AND journal_entries IS NULL ORDER BY ts",
+                    (start,),
+                )
+                .fetchall()
+            )
+        return [ts for (ts,) in rows]
+
+    def fill_journal_entries(self, entries: dict[int, tuple[int, dict[str, int]]]) -> None:
+        """Set stored ticks' journal entries: {ts: (all units' entries, {service: its entries})}.
+
+        Services absent from a tick's counts get zero; counted services absent from the tick are added.
+        """
+        with self._lock:
+            if not entries:
+                return
+            conn = self._connection()
+            stored = conn.execute(
+                "SELECT ts, services FROM samples WHERE ts >= ? AND ts <= ?", (min(entries), max(entries))
+            ).fetchall()
+            rows = []
+            for ts, services_json in stored:
+                if ts not in entries:
+                    continue
+                total, by_service = entries[ts]
+                services = {unit: list(values)[:3] for unit, values in json.loads(services_json).items()}
+                for unit in by_service.keys() - services.keys():
+                    services[unit] = [None, None, None]
+                for unit, values in services.items():
+                    values += [None] * (3 - len(values)) + [by_service.get(unit, 0)]
+                rows.append((total, json.dumps(services, separators=(",", ":")), ts))
+            with conn:
+                conn.executemany("UPDATE samples SET journal_entries = ?, services = ? WHERE ts = ?", rows)
 
     def _sum_by_service(self, field: str, start: float, end: float) -> dict[str, float]:
         path = f"$[{ServiceReading._fields.index(field)}]"
@@ -360,17 +436,33 @@ def _open(db_path: Path) -> sqlite3.Connection:
                 services TEXT NOT NULL
             )
             """)
+    had_journal_entries = "journal_entries" in _columns(conn)
     _add_missing_host_columns(conn)
+    if not had_journal_entries:
+        _drop_legacy_log_shares(conn)
     _drop_legacy_tables(conn)
     return conn
 
 
+def _columns(conn: sqlite3.Connection) -> set[str]:
+    return {row[1] for row in conn.execute("PRAGMA table_info(samples)")}
+
+
 def _add_missing_host_columns(conn: sqlite3.Connection) -> None:
-    existing = {row[1] for row in conn.execute("PRAGMA table_info(samples)")}
+    existing = _columns(conn)
     with conn:
         for column in _HOST_COLUMNS:
             if column not in existing:
                 conn.execute(f"ALTER TABLE samples ADD COLUMN {column} REAL")
+
+
+def _drop_legacy_log_shares(conn: sqlite3.Connection) -> None:
+    """Strip the per-tick journald KB shares that older rows kept where log entry counts now go."""
+    with conn:
+        conn.execute(
+            "UPDATE samples SET services = (SELECT json_group_object(key, json_remove(value, '$[3]')) "
+            "FROM json_each(samples.services))"
+        )
 
 
 def _drop_legacy_tables(conn: sqlite3.Connection) -> None:

@@ -15,8 +15,9 @@ from src.system_metrics import (
     ServiceCpuTracker,
     ServiceSample,
     SystemSample,
-    attribute_log_writes,
+    attach_log_entries,
     average_ticks,
+    backfill_journal_entries,
     get_history,
     get_latest_service_samples,
     get_service_history,
@@ -449,12 +450,14 @@ def _breakdown_tick(store: MetricsStore, now: float) -> None:
     store.append(make_tick(_sample(now - 60), services))
 
 
-def _writes_tick(store: MetricsStore, ts: float, host_mb: tuple[float | None, ...]) -> None:
+def _writes_tick(
+    store: MetricsStore, ts: float, host_mb: tuple[float | None, ...], journal_entries: int | None = None
+) -> None:
     disk, journald, system, user, claude = (None if mb is None else mb * 1024 for mb in host_mb)
     services = [
-        ServiceSample(ts, "projects_small.service", 1.0, 2.0, 1024.0, log_written_kb=512.0),
-        ServiceSample(ts, "projects_big.service", 10.0, 5.0, 3072.0),
-        ServiceSample(ts, "projects_exited.service", None, None, log_written_kb=1024.0),
+        ServiceSample(ts, "projects_small.service", 1.0, 2.0, 1024.0, log_entries=1),
+        ServiceSample(ts, "projects_big.service", 10.0, 5.0, 3072.0, log_entries=0),
+        ServiceSample(ts, "projects_exited.service", None, None, log_entries=2),
     ]
     host = replace(
         _sample(ts),
@@ -463,6 +466,7 @@ def _writes_tick(store: MetricsStore, ts: float, host_mb: tuple[float | None, ..
         system_slice_written_kb=system,
         user_slice_written_kb=user,
         claude_written_kb=claude,
+        journal_entries=journal_entries,
     )
     store.append(make_tick(host, services))
 
@@ -484,15 +488,15 @@ def test_writes_breakdown_splits_logs_and_counts_only_fully_read_ticks_outside_p
         metrics_store, now - 7200, (500.0, None, None, None, None)
     )  # before the slice counters existed
     metrics_store.flush()
-    _writes_tick(metrics_store, now - 60, (20.0, 4.0, 12.0, 1.5, 1.0))
+    _writes_tick(metrics_store, now - 60, (20.0, 4.0, 12.0, 1.5, 1.0), journal_entries=8)
 
     assert project_breakdown_payload("writes", now=now, store=metrics_store) == {
         "metric": "writes",
-        "total": 11.0,
+        "total": 9.5,
         "projects": [
             {"project": "big", "value": 6.0, "direct": 6.0, "logs": 0.0},
-            {"project": "small", "value": 3.0, "direct": 2.0, "logs": 1.0},
-            {"project": "exited", "value": 2.0, "direct": 0.0, "logs": 2.0},
+            {"project": "small", "value": 2.5, "direct": 2.0, "logs": 0.5},
+            {"project": "exited", "value": 1.0, "direct": 0.0, "logs": 1.0},
         ],
         "other_total": 14.5,
         "other": [
@@ -505,21 +509,66 @@ def test_writes_breakdown_splits_logs_and_counts_only_fully_read_ticks_outside_p
     }
 
 
-def test_attribute_log_writes_splits_journald_by_entries_across_project_units():
-    services = [ServiceSample(0.0, "projects_a.service", 1.0, 1.0, 10.0)]
+def test_log_writes_split_by_window_entries_not_by_the_tick_the_disk_write_landed_in(
+    metrics_store: MetricsStore, linux_units
+):
+    now = 1_700_000_000.0
+    burst = [ServiceSample(now - 90, "projects_big.service", 1.0, 1.0, 0.0, log_entries=4)]
+    metrics_store.append(
+        make_tick(replace(_sample(now - 90), journald_written_kb=0.0, journal_entries=4), burst)
+    )
+    lone = [ServiceSample(now - 60, "projects_small.service", 1.0, 1.0, 0.0, log_entries=1)]
+    metrics_store.append(
+        make_tick(replace(_sample(now - 60), journald_written_kb=8192.0, journal_entries=4), lone)
+    )
+
+    logs = {
+        p["project"]: p["logs"]
+        for p in project_breakdown_payload("writes", now=now, store=metrics_store)["projects"]
+    }
+
+    assert logs == {"big": 4.0, "small": 1.0}
+
+
+def test_attach_log_entries_counts_project_units_and_adds_ones_that_exited():
+    services = [
+        ServiceSample(0.0, "projects_a.service", 1.0, 1.0, 10.0),
+        ServiceSample(0.0, "projects_b.service", 1.0, 1.0, 1.0),
+    ]
     entries = {"projects_a.service": 3, "projects_gone.service": 1, "ssh.service": 4, "": 2}
 
-    attributed = attribute_log_writes(services, entries, journald_kb=100.0, ts=0.0)
+    attached = attach_log_entries(services, entries, ts=0.0)
 
-    assert [(s.service, s.written_kb, s.log_written_kb) for s in attributed] == [
-        ("projects_a.service", 10.0, 30.0),
-        ("projects_gone.service", None, 10.0),
+    assert [(s.service, s.written_kb, s.log_entries) for s in attached] == [
+        ("projects_a.service", 10.0, 3),
+        ("projects_b.service", 1.0, 0),
+        ("projects_gone.service", None, 1),
     ]
 
 
-def test_attribute_log_writes_without_a_journald_reading_leaves_services_alone():
-    services = [ServiceSample(0.0, "projects_a.service", 1.0, 1.0, 10.0)]
-    assert attribute_log_writes(services, {"projects_a.service": 3}, journald_kb=None, ts=0.0) == services
+def test_backfill_counts_each_journal_entry_into_the_tick_that_closes_its_interval(
+    metrics_store: MetricsStore, monkeypatch
+):
+    now = 1_700_000_000.0
+    for ts in (now - 60, now - 30):
+        services = [ServiceSample(ts, "projects_a.service", 1.0, 1.0, 0.0)]
+        metrics_store.append(make_tick(replace(_sample(ts), journald_written_kb=10.0), services))
+    journal = [
+        (now - 100, "projects_a.service"),
+        (now - 75, "projects_a.service"),
+        (now - 60, "ssh.service"),
+        (now - 45, "projects_gone.service"),
+        (now - 31, ""),
+    ]
+    monkeypatch.setattr("src.system_metrics.read_journal_entry_times", lambda since_ts: journal)
+
+    assert backfill_journal_entries(metrics_store, now) == 2
+    assert metrics_store.journal_attribution(now - 120, now) == (
+        20.0,
+        4,
+        {"projects_a.service": 1, "projects_gone.service": 1},
+    )
+    assert metrics_store.ticks_missing_journal_entries(now - 120) == []
 
 
 def test_cpu_by_project_sums_latest_reading_and_skips_missing(metrics_store: MetricsStore, linux_units):

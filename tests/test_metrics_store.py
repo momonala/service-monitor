@@ -142,3 +142,22 @@ def test_opening_an_older_samples_table_adds_the_written_column(db_path: Path):
     assert latest.system.disk_written_kb is None
     assert latest.services == {"a.service": (1.0, 2.0, None, None)}
     store.close()
+
+
+def test_opening_a_table_without_journal_entries_drops_the_old_per_tick_log_shares(db_path: Path):
+    store = MetricsStore(db_path, flush_interval=0, clock=lambda: NOW)
+    store.append(_tick(NOW - 30))
+    store.close()
+    with closing(sqlite3.connect(db_path)) as conn, conn:
+        conn.execute("ALTER TABLE samples DROP COLUMN journal_entries")
+        conn.execute(
+            "UPDATE samples SET services = ?", ('{"a.service":[1.0,2.0,3.0,512.0],"b.service":[1.0,2.0]}',)
+        )
+
+    store = MetricsStore(db_path, clock=lambda: NOW)
+
+    assert store.latest_tick().services == {
+        "a.service": (1.0, 2.0, 3.0, None),
+        "b.service": (1.0, 2.0, None, None),
+    }
+    store.close()
