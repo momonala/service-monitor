@@ -81,6 +81,11 @@ def _collect_detailed_statuses(services: list[str]) -> list[ServiceStatus]:
     return _collect_statuses(services, lambda svc: get_service_status(svc, include_ci=True, status_lines=0))
 
 
+def _is_known_service(service: str) -> bool:
+    known = get_services() if is_linux() else [status.name for status in canned_service_statuses]
+    return service in known
+
+
 def _validate_window(window: str) -> str | None:
     """Return an error message for an unknown history window, or None when it is valid."""
     if window not in WINDOWS:
@@ -150,6 +155,8 @@ def stream_logs():
     service = request.args.get("service", "")
     if not service:
         return "service parameter required", 400
+    if not _is_known_service(service):
+        return "Unknown service", 400
 
     def generate():
         if not is_linux():
@@ -229,7 +236,7 @@ def update_alert_setting():
     data = request.get_json(silent=True) or {}
     service = data.get("service", "")
     frequency = data.get("frequency", "")
-    if not service or frequency not in VALID_FREQUENCIES:
+    if not service or frequency not in VALID_FREQUENCIES or not _is_known_service(service):
         return "Invalid request", 400
     set_alert_frequency(service, frequency)
     return jsonify({"ok": True})
@@ -441,6 +448,8 @@ def service_history():
 @app.route("/")
 def index():
     service = request.args.get("service")
+    if service and not _is_known_service(service):
+        return "Unknown service", 400
     if is_linux():
         services = get_services()
         service_statuses = _collect_statuses(services, get_service_health)
@@ -472,7 +481,7 @@ def _exit_on_sigterm(_signum: int, _frame: object) -> None:
 def main() -> None:
     signal.signal(signal.SIGTERM, _exit_on_sigterm)
     start_scheduler()
-    app.run(host="0.0.0.0", port=FLASK_PORT, debug=False)
+    app.run(host="127.0.0.1", port=FLASK_PORT, debug=False)
 
 
 if __name__ == "__main__":

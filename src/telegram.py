@@ -25,11 +25,18 @@ def send_telegram_message(text: str) -> None:
         "text": _fit_telegram_length(text),
         "parse_mode": "Markdown",
     }
-    response = requests.post(
-        f"https://api.telegram.org/bot{TELEGRAM_API_TOKEN}/sendMessage",
-        data=payload,
-    )
-    response.raise_for_status()
+    try:
+        response = requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_API_TOKEN}/sendMessage",
+            data=payload,
+            timeout=10,
+        )
+    except requests.RequestException as exc:
+        raise requests.RequestException(f"Telegram request failed: {type(exc).__name__}") from None
+    if not response.ok:
+        raise requests.RequestException(
+            f"Telegram API returned {response.status_code}: {response.json().get('description')}"
+        )
 
 
 def send_service_failure_alert(service_status: ServiceStatus) -> None:

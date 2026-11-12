@@ -203,6 +203,7 @@ SSE stream. Each event is a JSON-encoded log line string:
 data: "2026-05-04T14:52:57+0200 hostname service[pid]: log line here"
 ```
 Client reconnects automatically on disconnect with exponential backoff.
+**Validation:** Returns 400 for services not in `systemctl list-units projects_*`.
 
 ### GET `/api/services/sidebar-details`
 
@@ -460,7 +461,7 @@ samples  (one row per 30s tick; host avg + max of the 1Hz ticks, plus every serv
 
 | Variable | Location | Default | Description |
 |---|---|---|---|
-| `host` | `src/app.py` | `0.0.0.0` | Bind address |
+| `host` | `src/app.py` | `127.0.0.1` | Bind address (reached only via the local Cloudflare Tunnel) |
 | `flask_port` | `pyproject.toml` `[tool.config]` | `5001` | HTTP port |
 | Unit filter pattern | `src/services.py` (`_list_systemd_units`) | `projects_*` | Which systemd units are monitored |
 | `DEFAULT_ALERT_FREQUENCY` | `src/scheduler.py` | `hourly` | Default frequency when a service has no saved setting |

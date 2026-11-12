@@ -231,6 +231,16 @@ def test_alert_settings_post_mute(mock_get_services, mock_is_linux, client, tmp_
     assert response.get_json()["projects_test1.service"] == "muted"
 
 
+@patch("src.app.is_linux", return_value=True)
+@patch("src.app.get_services", return_value=["projects_test1.service"])
+def test_unknown_service_rejected(mock_get_services, mock_is_linux, client):
+    """Routes taking a service name reject anything not in get_services()."""
+    assert client.get("/logs/stream?service=*").status_code == 400
+    assert client.get("/?service=--help").status_code == 400
+    response = client.post("/api/alert-settings", json={"service": "ssh.service", "frequency": "muted"})
+    assert response.status_code == 400
+
+
 def test_alert_settings_post_invalid(client):
     """POST /api/alert-settings rejects missing or invalid inputs."""
     response = client.post("/api/alert-settings", json={"service": "", "frequency": "muted"})

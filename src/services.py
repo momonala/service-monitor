@@ -231,7 +231,7 @@ def parse_last_error(status_text: str) -> str | None:
 
 def get_info_for_service(service: str, lines: int = 1000) -> str:
     result = subprocess.run(
-        ["systemctl", "status", service, "--no-pager", f"--lines={lines}"],
+        ["systemctl", "status", "--no-pager", f"--lines={lines}", "--", service],
         text=True,
         capture_output=True,
     )

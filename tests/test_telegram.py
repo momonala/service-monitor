@@ -72,3 +72,24 @@ def test_send_service_failure_alert_keeps_end_of_long_status(mock_send):
 def test_send_telegram_message_propagates_transport_errors(mock_post):
     with pytest.raises(requests.RequestException):
         send_telegram_message("ping")
+
+
+@patch("src.telegram.TELEGRAM_API_TOKEN", "SECRET_TOKEN")
+@patch("src.telegram.requests.post")
+def test_send_telegram_message_errors_omit_token(mock_post):
+    mock_post.return_value = MagicMock(ok=False, status_code=400)
+    mock_post.return_value.json.return_value = {
+        "ok": False,
+        "description": "Bad Request: can't parse entities",
+    }
+    with pytest.raises(requests.RequestException) as http_error:
+        send_telegram_message("*unclosed")
+    assert str(http_error.value) == "Telegram API returned 400: Bad Request: can't parse entities"
+
+    mock_post.side_effect = requests.ConnectionError(
+        "Max retries exceeded with url: /botSECRET_TOKEN/sendMessage"
+    )
+    with pytest.raises(requests.RequestException) as transport_error:
+        send_telegram_message("ping")
+    assert "SECRET_TOKEN" not in str(transport_error.value)
+    assert transport_error.value.__suppress_context__
