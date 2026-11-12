@@ -104,7 +104,7 @@ def restart_service():
         known = get_services(use_cache=True)
         if service not in known:
             logger.warning("Restart requested for unknown service: %s", service)
-            return f"Unknown service: {service}", 400
+            return "Unknown service", 400
 
     try:
         # Requires appropriate sudoers configuration for the running user
